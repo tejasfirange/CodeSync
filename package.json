@@ -1,0 +1,23 @@
+{
+  "name": "codesync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CodeSync - Real-time collaborative coding platform",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace server\" \"npm run dev --workspace client\"",
+    "build": "npm run build --workspace client",
+    "start": "npm start --workspace server",
+    "lint": "npm run lint --workspace server && npm run lint --workspace client"
+  },
+  "overrides": {
+    "dompurify": "3.4.1",
+    "monaco-editor": "0.53.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,338 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f7f7f4;
+  color: #171717;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+:root[data-theme='dark'] body {
+  background: #060807;
+  color: #f5f5f4;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c7c7bd;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9f9f92;
+}
+
+.remote-cursor {
+  border-left: 2px solid #22d3ee;
+  height: 18px;
+  pointer-events: none;
+  position: relative;
+  z-index: 20;
+}
+
+.remote-cursor-label {
+  border: 1px solid #22d3ee;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  margin-left: 5px;
+  margin-top: -18px;
+  opacity: 0.72;
+  padding: 1px 7px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(-10px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  white-space: nowrap;
+  z-index: 40;
+}
+
+.remote-cursor-label:hover,
+.monaco-editor .view-overlays:hover .remote-cursor-label {
+  opacity: 1;
+  transform: translateY(-14px);
+}
+
+.remote-selection {
+  pointer-events: none;
+}
+
+.room-page {
+  height: calc(100vh - 64px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #060807;
+}
+
+.room-toolbar {
+  height: 76px;
+  flex: 0 0 76px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  overflow: hidden;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  background: #0f1413;
+  padding: 12px 18px;
+}
+
+.room-toolbar-icon {
+  display: inline-flex;
+  height: 36px;
+  width: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  color: #d4d4d4;
+  background: rgb(255 255 255 / 0.04);
+}
+
+.room-toolbar-icon[aria-pressed='true'] {
+  border-color: rgb(94 234 212 / 0.4);
+  color: #ccfbf1;
+  background: rgb(20 184 166 / 0.14);
+}
+
+.room-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.room-main.explorer-open {
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.room-main.right-open {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.room-main.explorer-open.right-open {
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+}
+
+.explorer-panel,
+.editor-panel,
+.right-panel,
+.panel-shell {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.explorer-panel {
+  display: none;
+  width: 260px;
+  border-right: 1px solid rgb(255 255 255 / 0.1);
+  background: #0f1413;
+}
+
+.room-main.explorer-open .explorer-panel {
+  display: block;
+}
+
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  background: #060807;
+}
+
+.editor-tabs {
+  height: 36px;
+  flex: 0 0 36px;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  background: #080b0a;
+}
+
+.editor-tab {
+  max-width: 190px;
+  min-width: 96px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-right: 1px solid rgb(255 255 255 / 0.08);
+  color: #a3a3a3;
+  background: #0b0f0e;
+  padding: 0 8px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.editor-tab:hover {
+  color: #f5f5f4;
+  background: #121817;
+}
+
+.editor-tab.active {
+  color: #ccfbf1;
+  background: #111c1a;
+  box-shadow: inset 0 -2px 0 #5eead4;
+}
+
+.editor-tab-close {
+  height: 20px;
+  width: 20px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: #737373;
+}
+
+.editor-tab-close:hover {
+  background: rgb(255 255 255 / 0.1);
+  color: #fff;
+}
+
+.editor-header {
+  height: 42px;
+  flex: 0 0 42px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  overflow: hidden;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  background: #0d1110;
+  padding: 0 12px;
+}
+
+.editor-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-statusbar {
+  height: 24px;
+  flex: 0 0 24px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  overflow: hidden;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: #0f766e;
+  padding: 0 10px;
+  color: #ecfeff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.right-panel {
+  display: none;
+  width: 320px;
+  grid-template-rows: 220px minmax(0, 1fr);
+  border-left: 1px solid rgb(255 255 255 / 0.1);
+  background: #0f1413;
+}
+
+.room-main.right-open .right-panel {
+  display: grid;
+}
+
+.users-region,
+.chat-region {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.users-region {
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.explorer-panel *,
+.editor-panel *,
+.right-panel * {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .room-main.explorer-open.right-open {
+    grid-template-columns: 260px minmax(0, 1fr) 320px;
+  }
+}
+
+@media (max-width: 800px) {
+  .room-toolbar {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .room-main.explorer-open,
+  .room-main.explorer-open.right-open {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .room-main.right-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .room-main.explorer-open.right-open .right-panel,
+  .room-main.right-open .right-panel {
+    display: none;
+  }
+}
