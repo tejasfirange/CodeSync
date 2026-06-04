@@ -1,4 +1,4 @@
-import { ArrowRight, Copy, Crown, EllipsisVertical, Lock, Trash2, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, Copy, Crown, EllipsisVertical, Lock, Settings2, Trash2, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getInitials } from '../../utils/constants.js';
@@ -15,7 +15,7 @@ const formatDate = (value) => {
   }).format(new Date(value));
 };
 
-const RoomCard = ({ room, isOwner, onCopy, onDisband }) => {
+const RoomCard = ({ room, isOwner, onCopy, onDisband, onAnalytics, onSettings }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -90,6 +90,32 @@ const RoomCard = ({ room, isOwner, onCopy, onDisband }) => {
                     <Copy className="h-4 w-4" aria-hidden="true" />
                     Copy room code
                   </button>
+                  {isOwner ? (
+                    <>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-neutral-200 transition hover:bg-white/10"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onAnalytics?.(room);
+                        }}
+                      >
+                        <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                        Analytics
+                      </button>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-neutral-200 transition hover:bg-white/10"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onSettings?.(room);
+                        }}
+                      >
+                        <Settings2 className="h-4 w-4" aria-hidden="true" />
+                        Room settings
+                      </button>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-bold text-rose-200 transition hover:bg-rose-500/10"

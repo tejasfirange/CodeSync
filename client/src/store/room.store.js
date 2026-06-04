@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { createFileRequest, deleteFileRequest, listFilesByProjectRequest, updateFileRequest } from '../api/file.api.js';
 import { createProjectRequest, listProjectsByRoomRequest } from '../api/project.api.js';
-import { createRoomRequest, deleteRoomRequest, getRoomRequest, joinRoomRequest, listRoomsRequest } from '../api/room.api.js';
-import { DEFAULT_CODE } from '../utils/constants.js';
+import { createRoomRequest, deleteRoomRequest, getRoomRequest, joinRoomRequest, listRoomsRequest, updateMemberRoleRequest, updateRoomSettingsRequest } from '../api/room.api.js';
+import { getFileTemplate } from '../utils/fileTemplates.js';
 
 const replaceById = (items, nextItem) => items.map((item) => (item._id === nextItem._id ? nextItem : item));
 const getFilePath = (file) => file?.path || file?.filename || '';
@@ -66,6 +66,24 @@ export const useRoomStore = create((set, get) => ({
   loadRoom: async (roomId) => {
     const { room } = await getRoomRequest(roomId);
     set({ currentRoom: room });
+    return room;
+  },
+
+  updateRoomSettings: async (roomId, payload) => {
+    const { room } = await updateRoomSettingsRequest(roomId, payload);
+    set((state) => ({
+      currentRoom: state.currentRoom?._id === room._id ? room : state.currentRoom,
+      rooms: replaceById(state.rooms, room)
+    }));
+    return room;
+  },
+
+  updateMemberRole: async (roomId, userId, role) => {
+    const { room } = await updateMemberRoleRequest(roomId, userId, role);
+    set((state) => ({
+      currentRoom: state.currentRoom?._id === room._id ? room : state.currentRoom,
+      rooms: replaceById(state.rooms, room)
+    }));
     return room;
   },
 
@@ -167,20 +185,27 @@ export const useRoomStore = create((set, get) => ({
 
       let files = await get().loadFiles(activeProject._id);
       if (files.length === 0) {
-        const file = await get().createFile({
-          projectId: activeProject._id,
-          filename: 'index.js',
-          language: 'javascript',
-          content: DEFAULT_CODE
-        });
-        files = [file];
+        try {
+          const file = await get().createFile({
+            projectId: activeProject._id,
+            filename: 'index.js',
+            language: 'javascript',
+            content: getFileTemplate('index.js', 'javascript')
+          });
+          files = [file];
+        } catch (createDefaultError) {
+          if (createDefaultError.status !== 403) {
+            throw createDefaultError;
+          }
+          files = [];
+        }
       }
 
       set({
         projects,
         activeProject,
         files,
-        activeFile: files[0],
+        activeFile: files[0] || null,
         loading: false
       });
     } catch (error) {

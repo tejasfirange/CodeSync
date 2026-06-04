@@ -2,6 +2,7 @@ import http from 'http';
 import app from './app.js';
 import { connectDB } from './config/db.js';
 import { env } from './config/env.js';
+import { ensureCodeFileIndexes } from './models/CodeFile.model.js';
 import { setupSocketServer } from './sockets/socket.server.js';
 
 const httpServer = http.createServer(app);
@@ -11,6 +12,7 @@ app.set('io', io);
 const startServer = async () => {
   try {
     await connectDB();
+    await ensureCodeFileIndexes();
 
     httpServer.listen(env.port, () => {
       console.log(`CodeSync API listening on port ${env.port}`);

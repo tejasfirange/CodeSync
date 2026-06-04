@@ -1,11 +1,11 @@
 import clsx from '../../utils/clsx.js';
 
 const variants = {
-  primary: 'bg-neutral-950 text-white hover:bg-neutral-800 focus-visible:ring-neutral-900 dark:bg-teal-300 dark:text-neutral-950 dark:hover:bg-teal-200',
+  primary: 'cyber-btn cyber-btn-primary',
   secondary:
-    'bg-white text-neutral-900 border border-neutral-200 hover:bg-neutral-50 focus-visible:ring-teal-700 dark:border-white/10 dark:bg-white/5 dark:text-neutral-100 dark:hover:bg-white/10',
-  ghost: 'text-neutral-700 hover:bg-neutral-100 focus-visible:ring-teal-700 dark:text-neutral-200 dark:hover:bg-white/10',
-  danger: 'bg-rose-600 text-white hover:bg-rose-700 focus-visible:ring-rose-600'
+    'cyber-btn cyber-btn-secondary',
+  ghost: 'cyber-btn cyber-btn-ghost',
+  danger: 'cyber-btn cyber-btn-danger'
 };
 
 const sizes = {

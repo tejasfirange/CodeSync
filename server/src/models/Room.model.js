@@ -28,12 +28,18 @@ const roomSchema = new mongoose.Schema(
       required: true,
       index: true
     },
-    members: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-      }
-    ],
+    members: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: []
+    },
+    settings: {
+      allowEditorsToRunCode: { type: Boolean, default: false },
+      allowViewersToRunCode: { type: Boolean, default: false },
+      allowEditorsToManageFiles: { type: Boolean, default: true },
+      allowViewersToChat: { type: Boolean, default: true },
+      allowScreenShare: { type: Boolean, default: true },
+      allowViewersToScreenShare: { type: Boolean, default: false }
+    },
     isPrivate: {
       type: Boolean,
       default: false

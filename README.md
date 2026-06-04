@@ -125,9 +125,16 @@ Files:
 - `PATCH /api/files/:fileId`
 - `DELETE /api/files/:fileId`
 
+Execution:
+
+- `POST /api/execute`
+
 Chat:
 
 - `GET /api/chat/room/:roomId`
+- `GET /api/chat/room/:roomId/search?q=keyword&limit=50&page=1`
+- `POST /api/chat/room/:roomId/voice`
+- `GET /api/chat/voice/:fileName`
 
 GitHub:
 
@@ -189,6 +196,42 @@ Security:
 - GitHub endpoints have a stricter rate limit than normal API routes.
 - Never commit tokens, `.env` files, SSH keys, or private credentials.
 
+## Code Execution
+
+CodeSync can run the active file from a room workspace for these languages only:
+
+- JavaScript: `.js`
+- Python: `.py`
+- C++: `.cpp`, `.cc`, `.cxx`
+- C: `.c`
+
+Execution is a per-user action. Output is shown only to the user who clicks Run and is not stored in the database.
+
+### Docker Requirement
+
+Code execution requires Docker to be installed and running on the server. The backend uses Docker containers as the sandbox and never runs submitted code directly on the host.
+
+Sandbox controls:
+
+- Network disabled with `--network none`
+- Memory limited to `128m`
+- CPU limited to `0.5`
+- Process count limited with `--pids-limit 64`
+- Container removed after each run with `--rm`
+- Read-only container filesystem where possible
+- Timeout of 5 seconds
+- Code size limit of 200 KB
+- stdin limit of 20 KB
+
+The first C or C++ run may take longer because Docker may need to pull the `gcc:13` image. JavaScript uses `node:20-alpine`; Python uses `python:3.11-alpine`.
+
+Troubleshooting:
+
+- If you see `Code execution requires Docker to be running on the server.`, start Docker Desktop or the Docker daemon.
+- If C or C++ runs are slow at first, wait for Docker to finish pulling the GCC image.
+- If Docker reports permission errors on Linux, make sure the backend process user can access the Docker daemon.
+- Never replace the Docker sandbox with direct `child_process` execution of user code on the host.
+
 ## Socket Events
 
 Room events:
@@ -214,7 +257,21 @@ Chat events:
 - `typing:start`
 - `typing:stop`
 
+Voice notes are uploaded over REST as `multipart/form-data`; Socket.IO only broadcasts the created message metadata and playback URL.
+
+Screen share events:
+
+- `screen:start`
+- `screen:stop`
+- `screen:active`
+- `screen:user-joined-viewer`
+- `screen:user-left-viewer`
+- `webrtc:offer`
+- `webrtc:answer`
+- `webrtc:ice-candidate`
+
 All real-time events are scoped to the joined room. The server authenticates Socket.IO connections with the same HTTP-only JWT cookie used by the REST API.
+Screen sharing uses browser WebRTC peer-to-peer connections. The server only handles signaling.
 
 ## Security Notes
 
@@ -225,6 +282,7 @@ All real-time events are scoped to the joined room. The server authenticates Soc
 - Joi validates request bodies and parameters.
 - Helmet, CORS, rate limiting, Mongo query sanitization, HPP protection, and XSS sanitization are enabled.
 - MongoDB indexes are defined on auth, room lookup, membership, project, file, and chat query paths.
+- Voice notes are stored locally in `server/uploads/voice-notes/` for development. Browsers require microphone permission before recording. For production, move voice note storage to object storage such as S3 or Cloudinary and keep the same metadata-only chat message flow.
 
 ## Production
 

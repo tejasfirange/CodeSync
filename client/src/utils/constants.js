@@ -17,6 +17,7 @@ export const LANGUAGES = [
   { label: 'Python', value: 'python', extension: 'py' },
   { label: 'Java', value: 'java', extension: 'java' },
   { label: 'C++', value: 'cpp', extension: 'cpp' },
+  { label: 'C', value: 'c', extension: 'c' },
   { label: 'C#', value: 'csharp', extension: 'cs' },
   { label: 'Go', value: 'go', extension: 'go' },
   { label: 'Rust', value: 'rust', extension: 'rs' },

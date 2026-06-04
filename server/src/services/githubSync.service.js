@@ -147,6 +147,8 @@ export const pullRepoFiles = async ({ repositoryId, selectedPaths = [] }, userId
         file.lastEditedBy = userId;
         if (changed) {
           file.version += 1;
+          file.editCount = (file.editCount || 0) + 1;
+          file.lastEditedAt = new Date();
         }
         await file.save();
       } else {
@@ -165,6 +167,7 @@ export const pullRepoFiles = async ({ repositoryId, selectedPaths = [] }, userId
     }
 
     repository.lastSyncAt = new Date();
+    repository.lastPullAt = repository.lastSyncAt;
     await repository.save();
     await touchGithubAccount(account);
     emitPulledFiles(io, repository.room, syncedFiles, userId);
@@ -342,6 +345,7 @@ export const pushProjectFiles = async ({ repositoryId, fileIds = [], files: sele
   }
 
   repository.lastSyncAt = new Date();
+  repository.lastPushAt = repository.lastSyncAt;
   await repository.save();
   await touchGithubAccount(account);
 

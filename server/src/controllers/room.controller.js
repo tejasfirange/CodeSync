@@ -4,8 +4,11 @@ import {
   getRoomForUser,
   joinRoomByCode,
   listRoomsForUser,
-  updateRoom
+  updateMemberRole,
+  updateRoom,
+  updateRoomSettings
 } from '../services/room.service.js';
+import { getRoomAnalytics } from '../services/analytics.service.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
 
@@ -24,6 +27,11 @@ export const getById = asyncHandler(async (req, res) => {
   res.status(200).json(new ApiResponse(200, { room }, 'Room loaded'));
 });
 
+export const analytics = asyncHandler(async (req, res) => {
+  const result = await getRoomAnalytics(req.params.roomId, req.user._id);
+  res.status(200).json(new ApiResponse(200, result, 'Room analytics loaded'));
+});
+
 export const join = asyncHandler(async (req, res) => {
   const room = await joinRoomByCode(req.body.roomCode, req.user._id);
   res.status(200).json(new ApiResponse(200, { room }, 'Joined room'));
@@ -32,6 +40,16 @@ export const join = asyncHandler(async (req, res) => {
 export const update = asyncHandler(async (req, res) => {
   const room = await updateRoom(req.params.roomId, req.user._id, req.body);
   res.status(200).json(new ApiResponse(200, { room }, 'Room updated'));
+});
+
+export const updateSettings = asyncHandler(async (req, res) => {
+  const room = await updateRoomSettings(req.params.roomId, req.user._id, req.body);
+  res.status(200).json(new ApiResponse(200, { room }, 'Room settings updated'));
+});
+
+export const updateRole = asyncHandler(async (req, res) => {
+  const room = await updateMemberRole(req.params.roomId, req.params.userId, req.user._id, req.body.role);
+  res.status(200).json(new ApiResponse(200, { room }, 'Member role updated'));
 });
 
 export const remove = asyncHandler(async (req, res) => {

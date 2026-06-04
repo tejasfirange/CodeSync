@@ -1,11 +1,19 @@
-import { Copy, FilePlus2, MessageSquareText, PanelLeft, Save, Settings2, Trash2, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Copy, FilePlus2, MessageSquareText, PanelLeft, Play, Save, Settings2, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Panel, PanelGroup } from 'react-resizable-panels';
 import ChatPanel from '../components/chat/ChatPanel.jsx';
 import ActiveUsers from '../components/editor/ActiveUsers.jsx';
 import CodeEditor from '../components/editor/CodeEditor.jsx';
 import FileExplorer from '../components/editor/FileExplorer.jsx';
+import ExecutionPanel from '../components/execution/ExecutionPanel.jsx';
+import RunButton from '../components/execution/RunButton.jsx';
 import GitHubRepoManager from '../components/github/GitHubRepoManager.jsx';
+import ResizeHandle from '../components/layout/ResizeHandle.jsx';
+import ScreenShareButton from '../components/screenshare/ScreenShareButton.jsx';
+import ScreenSharePanel from '../components/screenshare/ScreenSharePanel.jsx';
+import { executeCodeRequest } from '../api/execute.api.js';
+import { installSandboxPackageRequest, listSandboxPackagesRequest, parseSandboxCommandRequest, removeSandboxPackageRequest } from '../api/sandbox.api.js';
 import Button from '../components/common/Button.jsx';
 import Input from '../components/common/Input.jsx';
 import Modal from '../components/common/Modal.jsx';
@@ -13,15 +21,70 @@ import Spinner from '../components/common/Spinner.jsx';
 import DisbandRoomModal from '../components/rooms/DisbandRoomModal.jsx';
 import useAuth from '../hooks/useAuth.js';
 import useRoom from '../hooks/useRoom.js';
+import useScreenShare from '../hooks/useScreenShare.js';
 import useSocket from '../hooks/useSocket.js';
 import { SOCKET_EVENTS } from '../socket/socketEvents.js';
-import { DEFAULT_CODE, LANGUAGES } from '../utils/constants.js';
+import { LANGUAGES } from '../utils/constants.js';
+import { detectLanguageFromPath, getFileTemplate } from '../utils/fileTemplates.js';
+import { detectLanguageFromFile, isExecutableLanguage, normalizeExecutableLanguage } from '../utils/language.js';
 
 const getFilePath = (file) => file?.path || file?.filename || '';
 const getBasename = (path) => path.split('/').filter(Boolean).pop() || path;
 const getEntityId = (value) => (typeof value === 'object' && value !== null ? value._id : value);
+const defaultRoomSettings = {
+  allowEditorsToRunCode: false,
+  allowViewersToRunCode: false,
+  allowEditorsToManageFiles: true,
+  allowViewersToChat: true,
+  allowScreenShare: true,
+  allowViewersToScreenShare: false
+};
+const getRoomSettings = (room) => ({ ...defaultRoomSettings, ...(room?.settings || {}) });
+const getMemberRole = (room, userId) => {
+  if (!room || !userId) return 'viewer';
+  if (getEntityId(room.owner) === userId) return 'owner';
+  const member = room.members?.find((entry) => getEntityId(entry.user || entry) === userId || entry._id === userId);
+  return member?.role || 'editor';
+};
+const getRoomPermissions = (room, userId) => {
+  const role = getMemberRole(room, userId);
+  const settings = getRoomSettings(room);
+  return {
+    role,
+    canEdit: role === 'owner' || role === 'editor',
+    canManageRoom: role === 'owner',
+    canManageFiles: role === 'owner' || (role === 'editor' && settings.allowEditorsToManageFiles),
+    canRunCode: role === 'owner' || (role === 'editor' && settings.allowEditorsToRunCode) || (role === 'viewer' && settings.allowViewersToRunCode),
+    canChat: role === 'owner' || role === 'editor' || (role === 'viewer' && settings.allowViewersToChat),
+    canScreenShare: role === 'owner' || (role === 'editor' && settings.allowScreenShare) || (role === 'viewer' && settings.allowViewersToScreenShare)
+  };
+};
 const languageByExtension = new Map(LANGUAGES.map((item) => [item.extension, item.value]));
-const inferLanguageFromPath = (path) => languageByExtension.get(path.split('.').pop()?.toLowerCase()) || 'plaintext';
+const inferLanguageFromPath = (path) => languageByExtension.get(path.split('.').pop()?.toLowerCase()) || detectLanguageFromPath(path) || 'plaintext';
+const readTerminalHeight = () => {
+  try {
+    return Number(localStorage.getItem('codesync.terminalHeight')) || 280;
+  } catch {
+    return 280;
+  }
+};
+const getExecutionHistoryKey = (roomId, fileId) => `codesync.executionHistory.${roomId}.${fileId || 'workspace'}`;
+const readExecutionHistory = (roomId, fileId) => {
+  try {
+    return JSON.parse(localStorage.getItem(getExecutionHistoryKey(roomId, fileId)) || '[]');
+  } catch {
+    return [];
+  }
+};
+const writeExecutionHistory = (roomId, fileId, history) => {
+  try {
+    localStorage.setItem(getExecutionHistoryKey(roomId, fileId), JSON.stringify(history.slice(0, 5)));
+  } catch {
+    // Local history is optional and should never break execution.
+  }
+};
+const isEditableShortcutTarget = (target) =>
+  Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"], .chat-region, .execution-panel'));
 const readWorkspaceSettings = () => {
   try {
     return {
@@ -39,6 +102,7 @@ const readWorkspaceSettings = () => {
 const Room = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const {
     currentRoom,
@@ -50,6 +114,8 @@ const Room = () => {
     loadWorkspace,
     resetWorkspace,
     disbandRoom,
+    updateRoomSettings,
+    updateMemberRole,
     setActiveFile,
     updateLocalFile,
     removeLocalFile,
@@ -64,6 +130,7 @@ const Room = () => {
   const [fileModalOpen, setFileModalOpen] = useState(false);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
   const [disbandOpen, setDisbandOpen] = useState(false);
   const [disbanding, setDisbanding] = useState(false);
   const [disbandError, setDisbandError] = useState('');
@@ -80,18 +147,64 @@ const Room = () => {
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
   const [userCursorTarget, setUserCursorTarget] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [executionOpen, setExecutionOpen] = useState(false);
+  const [executionRunning, setExecutionRunning] = useState(false);
+  const [executionResult, setExecutionResult] = useState(null);
+  const [executionError, setExecutionError] = useState('');
+  const [executionStdin, setExecutionStdin] = useState('');
+  const [executionHistory, setExecutionHistory] = useState([]);
+  const [sandboxPackages, setSandboxPackages] = useState([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packageInstalling, setPackageInstalling] = useState(false);
+  const [packageMessage, setPackageMessage] = useState('');
+  const [terminalHeight, setTerminalHeight] = useState(readTerminalHeight);
+  const [terminalRestoreHeight, setTerminalRestoreHeight] = useState(readTerminalHeight);
+  const [terminalMinimized, setTerminalMinimized] = useState(false);
   const [notice, setNotice] = useState('');
   const [pageError, setPageError] = useState('');
 
   const activeFileRef = useRef(activeFile);
   const disbandingRef = useRef(false);
+  const savingRef = useRef(false);
   const pendingPatchRef = useRef({});
   const codeTimerRef = useRef(null);
   const cursorTimerRef = useRef(null);
+  const roomSettings = getRoomSettings(currentRoom);
+  const permissions = getRoomPermissions(currentRoom, user?._id);
+  const isRoomHost = permissions.canManageRoom;
+  const showNotice = useCallback((message, timeout = 2200) => {
+    setNotice(message);
+    window.setTimeout(() => setNotice(''), timeout);
+  }, []);
+  const screenShare = useScreenShare({
+    socket,
+    roomId,
+    currentUser: user,
+    permissions,
+    roomSettings,
+    onNotice: showNotice
+  });
 
   useEffect(() => {
     activeFileRef.current = activeFile;
   }, [activeFile]);
+
+  useEffect(() => {
+    setExecutionHistory(readExecutionHistory(roomId, activeFile?._id));
+  }, [activeFile?._id, roomId]);
+
+  useEffect(() => {
+    if (searchParams.get('settings') === '1') {
+      setSettingsOpen(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const updateTerminalHeight = useCallback((height) => {
+    const nextHeight = Math.min(Math.floor(window.innerHeight * 0.6), Math.max(160, Math.round(height)));
+    setTerminalHeight(nextHeight);
+    localStorage.setItem('codesync.terminalHeight', String(nextHeight));
+  }, []);
 
   useEffect(() => {
     if (!activeFile?._id) {
@@ -119,6 +232,37 @@ const Room = () => {
       resetWorkspace();
     };
   }, [loadWorkspace, resetWorkspace, roomId]);
+
+  useEffect(() => {
+    if (!activeProject?._id || !permissions.canRunCode) {
+      setSandboxPackages([]);
+      return;
+    }
+
+    let cancelled = false;
+    setPackagesLoading(true);
+    listSandboxPackagesRequest(activeProject._id)
+      .then((dependencies) => {
+        if (!cancelled) {
+          setSandboxPackages(dependencies || []);
+        }
+      })
+      .catch((packagesError) => {
+        if (!cancelled) {
+          console.error('Unable to load sandbox packages:', packagesError);
+          setPackageMessage(packagesError.message || 'Unable to load sandbox packages.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPackagesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProject?._id, permissions.canRunCode]);
 
   useEffect(() => {
     if (!connected || !roomId) {
@@ -170,6 +314,10 @@ const Room = () => {
     };
 
     const handleSocketError = ({ message }) => setPageError(message);
+    const handlePermissionError = ({ message }) => {
+      setNotice(message || 'You do not have permission for that action.');
+      window.setTimeout(() => setNotice(''), 2200);
+    };
     const handleRoomDisbanded = () => {
       if (disbandingRef.current) {
         return;
@@ -183,6 +331,7 @@ const Room = () => {
     socket.on(SOCKET_EVENTS.PRESENCE_USERS_UPDATE, handlePresenceUsers);
     socket.on(SOCKET_EVENTS.CODE_SYNC, handleCodeSync);
     socket.on(SOCKET_EVENTS.SOCKET_ERROR, handleSocketError);
+    socket.on(SOCKET_EVENTS.PERMISSION_ERROR, handlePermissionError);
     socket.on(SOCKET_EVENTS.ROOM_DISBANDED, handleRoomDisbanded);
 
     socket.emit(SOCKET_EVENTS.ROOM_JOIN, { roomId }, (ack) => {
@@ -200,6 +349,7 @@ const Room = () => {
       socket.off(SOCKET_EVENTS.PRESENCE_USERS_UPDATE, handlePresenceUsers);
       socket.off(SOCKET_EVENTS.CODE_SYNC, handleCodeSync);
       socket.off(SOCKET_EVENTS.SOCKET_ERROR, handleSocketError);
+      socket.off(SOCKET_EVENTS.PERMISSION_ERROR, handlePermissionError);
       socket.off(SOCKET_EVENTS.ROOM_DISBANDED, handleRoomDisbanded);
       setUsers([]);
       setRoomJoined(false);
@@ -221,6 +371,9 @@ const Room = () => {
   }, [activeFile?._id, activeFile?.filename, activeFile?.path, connected, roomJoined, roomId, socket, user?._id]);
 
   const queueCodeChange = (patch) => {
+    if (!permissions.canEdit) {
+      return;
+    }
     pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
     window.clearTimeout(codeTimerRef.current);
 
@@ -247,7 +400,11 @@ const Room = () => {
   };
 
   const handleEditorChange = (content) => {
-    if (!activeFile) {
+    if (!activeFile || !permissions.canEdit) {
+      if (!permissions.canEdit) {
+        setNotice('You have view-only access.');
+        window.setTimeout(() => setNotice(''), 1600);
+      }
       return;
     }
 
@@ -277,42 +434,54 @@ const Room = () => {
     }, 75);
   };
 
-  const handleSave = async () => {
-    if (!activeFile) {
+  const handleSave = useCallback(async () => {
+    const fileToSave = activeFileRef.current;
+    if (!fileToSave?._id || savingRef.current || !permissions.canEdit) {
+      if (!permissions.canEdit) {
+        setNotice('You have view-only access.');
+        window.setTimeout(() => setNotice(''), 1600);
+      }
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     setNotice('');
     try {
-      await saveFile(activeFile._id, {
-        filename: activeFile.filename,
-        path: getFilePath(activeFile),
-        language: activeFile.language,
-        content: activeFile.content
+      await saveFile(fileToSave._id, {
+        filename: fileToSave.filename,
+        path: getFilePath(fileToSave),
+        language: fileToSave.language,
+        content: fileToSave.content
       });
       setDirtyFiles((current) => {
         const next = new Set(current);
-        next.delete(activeFile._id);
+        next.delete(fileToSave._id);
         return next;
       });
       setNotice('Saved');
     } catch (saveError) {
       setPageError(saveError.message);
     } finally {
+      savingRef.current = false;
       setSaving(false);
       window.setTimeout(() => setNotice(''), 1600);
     }
-  };
+  }, [permissions.canEdit, saveFile]);
 
   const handleCreateFile = async (event) => {
     event.preventDefault();
-    if (creatingFile) {
+    if (creatingFile || !permissions.canManageFiles) {
+      if (!permissions.canManageFiles) {
+        setNotice('You have view-only access.');
+        window.setTimeout(() => setNotice(''), 1600);
+      }
       return;
     }
 
     setPageError('');
     const path = newFile.path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
+    const language = inferLanguageFromPath(path);
 
     setCreatingFile(true);
     try {
@@ -320,8 +489,8 @@ const Room = () => {
         projectId: activeProject._id,
         filename: getBasename(path),
         path,
-        language: newFile.language || inferLanguageFromPath(path),
-        content: DEFAULT_CODE
+        language,
+        content: getFileTemplate(path, language)
       });
 
       socket.emit(SOCKET_EVENTS.CODE_CHANGE, {
@@ -345,6 +514,11 @@ const Room = () => {
   };
 
   const openRenameModal = (file) => {
+    if (!permissions.canManageFiles) {
+      setNotice('You have view-only access.');
+      window.setTimeout(() => setNotice(''), 1600);
+      return;
+    }
     setRenameFile(file);
     setRenamePath(getFilePath(file));
     setRenameModalOpen(true);
@@ -384,6 +558,11 @@ const Room = () => {
   };
 
   const handleDeleteFile = async (file) => {
+    if (!permissions.canManageFiles) {
+      setNotice('You have view-only access.');
+      window.setTimeout(() => setNotice(''), 1600);
+      return;
+    }
     if (files.length <= 1) {
       setPageError('A workspace needs at least one file');
       return;
@@ -470,6 +649,252 @@ const Room = () => {
     }
   };
 
+  const handlePermissionSettingChange = async (key, value) => {
+    if (!currentRoom?._id) return;
+    setSettingsSaving(true);
+    try {
+      await updateRoomSettings(currentRoom._id, { [key]: value });
+      setNotice('Settings updated');
+      window.setTimeout(() => setNotice(''), 1600);
+    } catch (settingError) {
+      setPageError(settingError.message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleMemberRoleChange = async (member, role) => {
+    if (!currentRoom?._id) return;
+    const memberId = getEntityId(member.user || member);
+    if (memberId === user?._id && role !== 'owner') {
+      const confirmed = window.confirm('Demote yourself from owner? You may lose access to room settings.');
+      if (!confirmed) return;
+    }
+    setSettingsSaving(true);
+    try {
+      await updateMemberRole(currentRoom._id, memberId, role);
+    } catch (roleError) {
+      setPageError(roleError.message);
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const getExecutionLanguage = (file = activeFile) => {
+    const path = getFilePath(file);
+    return detectLanguageFromFile(path) || normalizeExecutableLanguage(file?.language);
+  };
+
+  const pushExecutionHistory = useCallback(
+    (file, language, result) => {
+      if (!file?._id || !result) {
+        return;
+      }
+
+      const item = {
+        id: `${Date.now()}-${file._id}`,
+        ranAt: new Date().toISOString(),
+        language,
+        fileId: file._id,
+        fileName: file.filename || getFilePath(file),
+        result
+      };
+      const nextHistory = [item, ...readExecutionHistory(roomId, file._id).filter((entry) => entry.id !== item.id)].slice(0, 5);
+      setExecutionHistory(nextHistory);
+      writeExecutionHistory(roomId, file._id, nextHistory);
+    },
+    [roomId]
+  );
+
+  const handleRunCode = useCallback(async () => {
+    const fileToRun = activeFileRef.current;
+    if (!fileToRun || !activeProject?._id) {
+      return;
+    }
+
+    const filePath = getFilePath(fileToRun);
+    const language = getExecutionLanguage(fileToRun);
+    if (!isExecutableLanguage(fileToRun.language, filePath)) {
+      setNotice('Execution is only supported for JavaScript, Python, C++, and C.');
+      window.setTimeout(() => setNotice(''), 2400);
+      return;
+    }
+
+    setExecutionOpen(true);
+    setTerminalMinimized(false);
+    if (!permissions.canRunCode) {
+      setExecutionError('Terminal access is disabled by the room owner.');
+      return;
+    }
+    setExecutionRunning(true);
+    setExecutionError('');
+    setExecutionResult({
+      status: 'running',
+      stdout: '',
+      stderr: '',
+      language
+    });
+
+    try {
+      const result = await executeCodeRequest({
+        roomId,
+        projectId: activeProject._id,
+        fileId: fileToRun._id,
+        language,
+        code: fileToRun.content,
+        stdin: executionStdin
+      });
+      setExecutionResult(result);
+      pushExecutionHistory(fileToRun, language, result);
+      return result;
+    } catch (runError) {
+      setExecutionError(runError.message || 'Code execution failed');
+      const errorResult = {
+        status: 'error',
+        stdout: '',
+        stderr: runError.message || 'Code execution failed',
+        language
+      };
+      setExecutionResult(errorResult);
+      pushExecutionHistory(fileToRun, language, errorResult);
+      return errorResult;
+    } finally {
+      setExecutionRunning(false);
+    }
+  }, [activeProject?._id, executionStdin, getExecutionLanguage, permissions.canRunCode, pushExecutionHistory, roomId]);
+
+  const handleInstallSandboxPackage = useCallback(
+    async (packageName, language = 'python') => {
+      if (!activeProject?._id) {
+        return;
+      }
+      if (!permissions.canRunCode) {
+        setPackageMessage('Terminal access is disabled by the room owner.');
+        return;
+      }
+
+      setPackageInstalling(true);
+      setPackageMessage('');
+      try {
+        const installResult = await installSandboxPackageRequest({
+          roomId,
+          projectId: activeProject._id,
+          language,
+          packageName
+        });
+
+        if (installResult.dependency) {
+          setSandboxPackages((current) => {
+            const withoutDuplicate = current.filter((dependency) => dependency._id !== installResult.dependency._id);
+            return [...withoutDuplicate, installResult.dependency].sort((a, b) => a.packageName.localeCompare(b.packageName));
+          });
+        }
+
+        const status = installResult.result?.status || 'success';
+        setPackageMessage(status === 'success' ? `${packageName} installed in the project sandbox.` : installResult.result?.stderr || 'Package installation failed.');
+        const historyItem = {
+          id: `${Date.now()}-install-${packageName}`,
+          ranAt: new Date().toISOString(),
+          language,
+          fileId: activeFileRef.current?._id || 'packages',
+          fileName: `install python ${packageName}`,
+          result: {
+            status,
+            stdout: installResult.result?.stdout || '',
+            stderr: installResult.result?.stderr || '',
+            language
+          }
+        };
+        setExecutionHistory((current) => [historyItem, ...current].slice(0, 5));
+        return installResult;
+      } catch (installError) {
+        console.error('Sandbox package install failed:', installError);
+        setPackageMessage(installError.message || 'Package installation failed.');
+        throw installError;
+      } finally {
+        setPackageInstalling(false);
+      }
+    },
+    [activeProject?._id, permissions.canRunCode, roomId]
+  );
+
+  const handleRemoveSandboxPackage = useCallback(async (dependencyId) => {
+    try {
+      await removeSandboxPackageRequest(dependencyId);
+      setSandboxPackages((current) => current.filter((dependency) => dependency._id !== dependencyId));
+      setPackageMessage('Package removed from project sandbox.');
+    } catch (removeError) {
+      console.error('Sandbox package remove failed:', removeError);
+      setPackageMessage(removeError.message || 'Unable to remove package.');
+    }
+  }, []);
+
+  const handleSandboxCommand = useCallback(
+    async (command) => {
+      const parsed = await parseSandboxCommandRequest(command);
+      if (parsed.action === 'help') {
+        return {
+          status: 'success',
+          stdout: [
+            'Allowed commands:',
+            'run                        Run current file',
+            'clear                      Clear output',
+            'help                       Show this help',
+            'python <file.py>           Run a Python file',
+            'py <file.py>               Run a Python file',
+            'node <file.js>             Run a JavaScript file',
+            'gcc <file.c>               Compile & run a C file',
+            'gcc <file.c> -o <out>      Compile C with output name',
+            'g++ <file.cpp>             Compile & run a C++ file',
+            'g++ <file.cpp> -o <out>    Compile C++ with output name',
+            './main                     Run last compiled binary',
+            'pip install <package>      Install Python package',
+            'npm install <package>      Install Node package',
+            'install python <package>   Install Python package',
+            'install node <package>     Install Node package'
+          ].join('\n'),
+          stderr: ''
+        };
+      }
+      if (parsed.action === 'clear') {
+        setExecutionResult(null);
+        setExecutionError('');
+        return { status: 'success', stdout: 'Output cleared.', stderr: '' };
+      }
+      if (parsed.action === 'install-package') {
+        const result = await handleInstallSandboxPackage(parsed.packageName, parsed.language);
+        return result?.result || { status: 'success', stdout: `Installed ${parsed.packageName}.`, stderr: '' };
+      }
+      if (parsed.action === 'run' || parsed.action === 'run-current-file') {
+        return handleRunCode();
+      }
+      if (parsed.action === 'run-file') {
+        const targetPath = parsed.path.replace(/\\/g, '/');
+        const targetFile = files.find((file) => getFilePath(file) === targetPath || file.filename === targetPath);
+        if (!targetFile) {
+          throw new Error('File not found in this project.');
+        }
+        setActiveFile(targetFile._id);
+        activeFileRef.current = targetFile;
+        return handleRunCode();
+      }
+      if (parsed.action === 'run-binary') {
+        // Run the currently active C/C++ file (compile + run)
+        const currentFile = activeFileRef.current;
+        if (!currentFile) {
+          throw new Error('No file is active. Open a C or C++ file first.');
+        }
+        const ext = getFilePath(currentFile).split('.').pop()?.toLowerCase();
+        if (!['c', 'cpp', 'cc', 'cxx'].includes(ext)) {
+          throw new Error('./main can only be used after compiling a C/C++ file. Open a .c or .cpp file.');
+        }
+        return handleRunCode();
+      }
+      throw new Error('Unsupported sandbox command. Type help to see allowed commands.');
+    },
+    [files, handleInstallSandboxPackage, handleRunCode, setActiveFile]
+  );
+
   const closeTab = (fileId) => {
     setOpenedFileIds((current) => current.filter((id) => id !== fileId));
     if (activeFile?._id === fileId) {
@@ -483,12 +908,33 @@ const Room = () => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         handleSave();
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === '`') {
+        event.preventDefault();
+        setExecutionOpen((value) => !value);
+        setTerminalMinimized(false);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        const editorFocused = Boolean(event.target?.closest?.('.monaco-editor'));
+        if (editorFocused) {
+          event.preventDefault();
+          handleRunCode();
+        }
+        return;
+      }
+
+      if (event.key === 'Escape' && executionOpen && !event.target?.closest?.('.monaco-editor') && !isEditableShortcutTarget(event.target)) {
+        setExecutionOpen(false);
       }
     };
 
     window.addEventListener('keydown', handleShortcut);
     return () => window.removeEventListener('keydown', handleShortcut);
-  }, [activeFile?._id, activeFile?.content, activeFile?.language]);
+  }, [executionOpen, handleRunCode, handleSave]);
 
   if (loading && !activeFile) {
     return (
@@ -511,8 +957,10 @@ const Room = () => {
 
   const activeFilePath = getFilePath(activeFile);
   const activeFileDirty = activeFile ? dirtyFiles.has(activeFile._id) : false;
-  const isRoomHost = getEntityId(currentRoom?.owner) === user?._id;
+  const activeExecutionLanguage = getExecutionLanguage(activeFile);
+  const activeFileExecutable = activeFile ? isExecutableLanguage(activeFile.language, activeFilePath) : false;
   const openedFiles = openedFileIds.map((fileId) => files.find((file) => file._id === fileId)).filter(Boolean);
+  const usersWithRoles = users.map((entry) => ({ ...entry, role: getMemberRole(currentRoom, entry.userId || entry._id) }));
   const saveState = saving ? 'Saving...' : activeFileDirty ? 'Unsaved changes' : activeFile ? 'Saved' : 'Idle';
 
   return (
@@ -540,6 +988,7 @@ const Room = () => {
                 {currentRoom?.roomCode}
               </button>
               {notice ? <span className="truncate text-xs font-bold text-teal-300">{notice}</span> : null}
+              {!permissions.canEdit ? <span className="rounded border border-[var(--border-main)] px-2 py-1 text-xs font-black uppercase text-[var(--accent)]">View only</span> : null}
             </div>
             <p className="truncate text-sm font-medium text-neutral-400">{activeProject?.title}</p>
           </div>
@@ -547,6 +996,27 @@ const Room = () => {
 
         <div className="flex shrink-0 items-center gap-2">
           <GitHubRepoManager project={activeProject} files={files} onPullFiles={handleGitHubPullFiles} canManage={isRoomHost} />
+          <ScreenShareButton
+            activeShare={screenShare.activeShare}
+            isSharing={screenShare.isSharing}
+            canShare={screenShare.canShare}
+            status={screenShare.status}
+            currentUserId={user?._id}
+            onStart={screenShare.startSharing}
+            onStop={screenShare.stopSharing}
+            onOpen={() => setRightPanelOpen(true)}
+          />
+          <RunButton
+            disabled={false}
+            unsupported={Boolean(activeFile && !activeFileExecutable)}
+            onRun={() => {
+              setExecutionOpen((value) => !value);
+              setTerminalMinimized(false);
+              if (!permissions.canRunCode) {
+                setExecutionError('Terminal access is disabled by the room owner.');
+              }
+            }}
+          />
           <button
             type="button"
             className="room-toolbar-icon"
@@ -556,10 +1026,10 @@ const Room = () => {
           >
             <Settings2 className="h-4 w-4" />
           </button>
-          <Button variant="secondary" icon={FilePlus2} onClick={() => setFileModalOpen(true)}>
+          <Button variant="secondary" icon={FilePlus2} onClick={() => setFileModalOpen(true)} disabled={!permissions.canManageFiles}>
             File
           </Button>
-          <Button icon={Save} onClick={handleSave} disabled={saving || !activeFile}>
+          <Button icon={Save} onClick={handleSave} disabled={saving || !activeFile || !permissions.canEdit}>
             {saving ? 'Saving' : 'Save'}
           </Button>
           <button
@@ -574,148 +1044,287 @@ const Room = () => {
         </div>
       </div>
 
-      <section className={`room-main ${explorerOpen ? 'explorer-open' : ''} ${rightPanelOpen ? 'right-open' : ''}`}>
-        <div className="explorer-panel">
-          <div className="panel-shell">
-            <FileExplorer
-              files={files}
-              activeFile={activeFile}
-              onSelect={handleSelectFile}
-              onCreate={() => setFileModalOpen(true)}
-              onRename={openRenameModal}
-              onDelete={handleDeleteFile}
-            />
-          </div>
-        </div>
-
-        <div className="editor-panel">
-          <div className="editor-tabs">
-            {openedFiles.length ? (
-              openedFiles.map((file) => {
-                const path = getFilePath(file);
-                const isActive = activeFile?._id === file._id;
-                const isDirty = dirtyFiles.has(file._id);
-
-                return (
-                  <button
-                    key={file._id}
-                    type="button"
-                    className={`editor-tab ${isActive ? 'active' : ''}`}
-                    onClick={() => handleSelectFile(file._id)}
-                    title={path}
-                  >
-                    <span className="truncate">{file.filename || getBasename(path)}</span>
-                    {isDirty ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" /> : null}
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="editor-tab-close"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeTab(file._id);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          closeTab(file._id);
-                        }
-                      }}
-                      aria-label={`Close ${file.filename}`}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </span>
-                  </button>
-                );
-              })
-            ) : (
-              <span className="px-3 text-xs font-semibold text-neutral-500">No open files</span>
-            )}
-          </div>
-
-          <div className="editor-header">
-            {activeFile ? (
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-black text-white" title={activeFilePath}>
-                    {activeFile.filename || getBasename(activeFilePath)}
-                  </span>
-                  {activeFileDirty ? <span className="h-2 w-2 shrink-0 rounded-full bg-amber-300" title="Unsaved changes" /> : null}
+      <section className="room-main">
+        <PanelGroup direction="horizontal" autoSaveId="codesync.mainLayout">
+          {explorerOpen ? (
+            <>
+              <Panel
+                id="explorer"
+                order={1}
+                defaultSize={18}
+                minSize={10}
+                maxSize={30}
+                className="explorer-panel explorer-panel-visible"
+              >
+                <div className="panel-shell">
+                  <FileExplorer
+                    files={files}
+                    activeFile={activeFile}
+                    onSelect={handleSelectFile}
+                    onCreate={() => setFileModalOpen(true)}
+                    onRename={permissions.canManageFiles ? openRenameModal : undefined}
+                    onDelete={permissions.canManageFiles ? handleDeleteFile : undefined}
+                  />
                 </div>
-                <p className="truncate text-xs font-semibold text-neutral-500" title={activeFilePath}>
-                  {activeFilePath}
-                </p>
-              </div>
-            ) : (
-              <p className="text-sm font-semibold text-neutral-500">No file selected</p>
-            )}
-            <button
-              type="button"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-neutral-500 hover:bg-white/10 hover:text-white"
-              onClick={() => activeFile && setActiveFile(null)}
-              aria-label="Close active file"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+              </Panel>
+              <ResizeHandle id="explorer-resize" />
+            </>
+          ) : null}
 
-          <div className="editor-body">
-            {activeFile ? (
-              <CodeEditor
-                file={activeFile}
-                value={activeFile.content}
-                onChange={handleEditorChange}
-                onCursorChange={handleCursorChange}
-                socket={socket}
-                roomId={roomId}
-                currentUserId={user?._id}
-                presenceUsers={users}
-                showRemoteCursors={workspaceSettings.remoteCursorsEnabled}
-                focusPosition={userCursorTarget?.fileId === activeFile._id ? userCursorTarget : null}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm font-semibold text-neutral-500">
-                Select a file from Explorer
-              </div>
-            )}
-          </div>
+          <Panel id="editor-area" order={2} defaultSize={explorerOpen && rightPanelOpen ? 60 : explorerOpen || rightPanelOpen ? 78 : 100} minSize={30}>
+            <div className="flex h-full flex-col">
+              <PanelGroup direction="vertical" autoSaveId="codesync.editorLayout">
+                <Panel id="editor-main" order={1} defaultSize={executionOpen ? 70 : 100} minSize={20} className="editor-panel">
+                  <div className="editor-tabs">
+                    {openedFiles.length ? (
+                      openedFiles.map((file) => {
+                        const path = getFilePath(file);
+                        const isActive = activeFile?._id === file._id;
+                        const isDirty = dirtyFiles.has(file._id);
 
-          <div className="editor-statusbar">
-            <span>{connected ? 'Connected' : 'Offline'}</span>
-            <span>{activeFile?.language || 'No language'}</span>
-            <span>
-              Ln {cursorPosition.lineNumber || 1}, Col {cursorPosition.column || 1}
-            </span>
-            <span>{saveState}</span>
-            <span>{users.length} active</span>
-          </div>
-        </div>
+                        return (
+                          <button
+                            key={file._id}
+                            type="button"
+                            className={`editor-tab ${isActive ? 'active' : ''}`}
+                            onClick={() => handleSelectFile(file._id)}
+                            title={path}
+                          >
+                            <span className="truncate">{file.filename || getBasename(path)}</span>
+                            {isDirty ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" /> : null}
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              className="editor-tab-close"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                closeTab(file._id);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  closeTab(file._id);
+                                }
+                              }}
+                              aria-label={`Close ${file.filename}`}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </span>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <span className="px-3 text-xs font-semibold text-neutral-500">No open files</span>
+                    )}
+                  </div>
 
-        <div className="right-panel">
-          <div className="users-region">
-            <ActiveUsers
-              users={users}
-              connected={connected}
-              activeFileId={activeFile?._id}
-              currentUserId={user?._id}
-              pingMs={pingMs}
-              onOpenUserFile={handleOpenUserFile}
-            />
-          </div>
-          <div className="chat-region">
-            {workspaceSettings.chatEnabled ? (
-              <ChatPanel roomId={roomId} socket={socket} currentUser={user} />
-            ) : (
-              <div className="flex h-full items-center justify-center px-4 text-center text-sm font-semibold text-neutral-500">
-                Chat is turned off in your workspace settings.
+                  <div className="editor-header">
+                    {activeFile ? (
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-black text-white" title={activeFilePath}>
+                            {activeFile.filename || getBasename(activeFilePath)}
+                          </span>
+                          {activeFileDirty ? <span className="h-2 w-2 shrink-0 rounded-full bg-amber-300" title="Unsaved changes" /> : null}
+                        </div>
+                        <p className="truncate text-xs font-semibold text-neutral-500" title={activeFilePath}>
+                          {activeFilePath}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm font-semibold text-neutral-500">No file selected</p>
+                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        className="flex h-8 items-center gap-1.5 rounded border border-white/10 bg-white/5 px-2 text-xs font-bold text-neutral-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={handleRunCode}
+                        disabled={!activeFile || !activeFileExecutable || executionRunning || !permissions.canRunCode}
+                        title={activeFileExecutable ? 'Run current file' : 'Execution is only supported for JavaScript, Python, C++, and C.'}
+                      >
+                        <Play className="h-3.5 w-3.5" aria-hidden="true" />
+                        {executionRunning ? 'Running' : 'Run'}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 items-center justify-center rounded text-neutral-500 hover:bg-white/10 hover:text-white"
+                        onClick={() => activeFile && setActiveFile(null)}
+                        aria-label="Close active file"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="editor-body">
+                    {activeFile ? (
+                      <CodeEditor
+                        file={activeFile}
+                        value={activeFile.content}
+                        onChange={handleEditorChange}
+                        onCursorChange={handleCursorChange}
+                        socket={socket}
+                        roomId={roomId}
+                        currentUserId={user?._id}
+                        presenceUsers={users}
+                        showRemoteCursors={workspaceSettings.remoteCursorsEnabled}
+                        focusPosition={userCursorTarget?.fileId === activeFile._id ? userCursorTarget : null}
+                        readOnly={!permissions.canEdit}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-sm font-semibold text-neutral-500">
+                        Select a file from Explorer
+                      </div>
+                    )}
+                  </div>
+                </Panel>
+
+                {executionOpen ? (
+                  <>
+                    <ResizeHandle id="terminal-resize" />
+                    <Panel
+                      id="terminal"
+                      order={2}
+                      defaultSize={30}
+                      minSize={terminalMinimized ? 3 : 12}
+                      maxSize={60}
+                      className="terminal-panel-wrapper"
+                    >
+                      <ExecutionPanel
+                        open={executionOpen}
+                        activeFile={activeFile}
+                        language={activeExecutionLanguage}
+                        stdin={executionStdin}
+                        result={executionResult}
+                        running={executionRunning}
+                        error={executionError}
+                        canRun={permissions.canRunCode}
+                        packages={sandboxPackages}
+                        packagesLoading={packagesLoading}
+                        packageInstalling={packageInstalling}
+                        packageMessage={packageMessage}
+                        height={terminalHeight}
+                        minimized={terminalMinimized}
+                        history={executionHistory}
+                        onHeightChange={(height) => {
+                          setTerminalMinimized(false);
+                          updateTerminalHeight(height);
+                        }}
+                        onStdinChange={setExecutionStdin}
+                        onRunAgain={handleRunCode}
+                        onClear={() => {
+                          setExecutionResult(null);
+                          setExecutionError('');
+                        }}
+                        onMinimize={() => setTerminalMinimized(true)}
+                        onMaximize={() => {
+                          setTerminalMinimized(false);
+                          setTerminalRestoreHeight(terminalHeight);
+                          updateTerminalHeight(Math.floor(window.innerHeight * 0.6));
+                        }}
+                        onRestore={() => {
+                          setTerminalMinimized(false);
+                          updateTerminalHeight(terminalRestoreHeight);
+                        }}
+                        onClose={() => setExecutionOpen(false)}
+                        onSelectHistory={(item) => {
+                          setExecutionResult(item.result);
+                          setExecutionError('');
+                          setTerminalMinimized(false);
+                        }}
+                        onInstallPackage={handleInstallSandboxPackage}
+                        onRemovePackage={handleRemoveSandboxPackage}
+                        onCommand={handleSandboxCommand}
+                        onManageAccess={permissions.canManageRoom ? () => setSettingsOpen(true) : null}
+                      />
+                    </Panel>
+                  </>
+                ) : null}
+              </PanelGroup>
+
+              <div className="editor-statusbar">
+                <div className="flex items-center gap-4">
+                  <span className={connected ? 'text-[#39ff88]' : 'text-red-400'}>{connected ? '● Connected' : '○ Offline'}</span>
+                  <span className="opacity-60">|</span>
+                  <span className="text-[#39ff88]">{activeFile?.language || 'plain text'}</span>
+                  <span className="opacity-60">|</span>
+                  <span>
+                    Ln {cursorPosition.lineNumber || 1}, Col {cursorPosition.column || 1}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="opacity-80 uppercase tracking-widest">{saveState}</span>
+                  <span className="opacity-60">|</span>
+                  <span className="text-[#00e5ff]">{users.length} active</span>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </Panel>
+
+          {rightPanelOpen ? (
+            <>
+              <ResizeHandle id="right-resize" />
+              <Panel
+                id="right"
+                order={3}
+                defaultSize={22}
+                minSize={15}
+                maxSize={35}
+                className="right-panel right-panel-visible"
+              >
+                <PanelGroup direction="vertical" autoSaveId="codesync.rightLayout">
+                  <Panel id="users" order={1} defaultSize={35} minSize={15} className="users-region">
+                    <ActiveUsers
+                      users={usersWithRoles}
+                      connected={connected}
+                      activeFileId={activeFile?._id}
+                      currentUserId={user?._id}
+                      pingMs={pingMs}
+                      onOpenUserFile={handleOpenUserFile}
+                    />
+                  </Panel>
+                  <ResizeHandle id="users-chat-resize" />
+                  <Panel id="chat" order={2} defaultSize={65} minSize={25} className="chat-region">
+                    <div className="flex h-full min-h-0 flex-col bg-[#0f1413]">
+                      <ScreenSharePanel
+                        activeShare={screenShare.activeShare}
+                        status={screenShare.status}
+                        error={screenShare.error}
+                        isSharing={screenShare.isSharing}
+                        localStreamRef={screenShare.localStreamRef}
+                        remoteStreamRef={screenShare.remoteStreamRef}
+                        localStreamVersion={screenShare.localStreamVersion}
+                        remoteStreamVersion={screenShare.remoteStreamVersion}
+                        onStop={screenShare.stopSharing}
+                      />
+                      <div className="min-h-0 flex-1">
+                        {workspaceSettings.chatEnabled && permissions.canChat ? (
+                          <ChatPanel roomId={roomId} socket={socket} currentUser={user} />
+                        ) : (
+                          <div className="flex h-full items-center justify-center px-4 text-center text-sm font-semibold text-neutral-500">
+                            Chat is turned off for your role.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Panel>
+                </PanelGroup>
+              </Panel>
+            </>
+          ) : null}
+        </PanelGroup>
       </section>
 
-      <Modal title="Workspace settings" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+      <Modal title="Room settings" open={settingsOpen} onClose={() => setSettingsOpen(false)} size="xl">
         <div className="space-y-3">
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="text-sm font-black text-white">{currentRoom?.name}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-400">
+              <span>Code: {currentRoom?.roomCode}</span>
+              <Button variant="ghost" size="sm" icon={Copy} onClick={copyRoomCode}>Copy invite code</Button>
+            </div>
+          </div>
           <label className="flex items-center justify-between gap-4 rounded-lg border border-white/10 bg-black/20 p-3">
             <span>
               <span className="block text-sm font-bold text-white">Chat</span>
@@ -740,6 +1349,58 @@ const Room = () => {
               onChange={(event) => setWorkspaceSettings((current) => ({ ...current, remoteCursorsEnabled: event.target.checked }))}
             />
           </label>
+          {permissions.canManageRoom ? (
+            <div className="space-y-3 rounded-lg border border-white/10 bg-black/20 p-3">
+              <p className="text-sm font-black text-white">Permissions</p>
+              {[
+                ['allowEditorsToRunCode', 'Allow editors to run code'],
+                ['allowViewersToRunCode', 'Allow viewers to run code'],
+                ['allowEditorsToManageFiles', 'Allow editors to manage files'],
+                ['allowViewersToChat', 'Allow viewers to chat'],
+                ['allowScreenShare', 'Allow editors to share screen'],
+                ['allowViewersToScreenShare', 'Allow viewers to share screen']
+              ].map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between gap-4 rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <span className="text-sm font-semibold text-neutral-200">{label}</span>
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-teal-300"
+                    checked={Boolean(roomSettings[key])}
+                    disabled={settingsSaving}
+                    onChange={(event) => handlePermissionSettingChange(key, event.target.checked)}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : null}
+          <div className="space-y-2 rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="text-sm font-black text-white">Members</p>
+            {(currentRoom?.members || []).map((member) => {
+              const memberId = getEntityId(member.user || member);
+              return (
+                <div key={memberId} className="flex items-center justify-between gap-3 rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-white">{member.name || member.user?.name || 'Member'}</p>
+                    <p className="truncate text-xs text-neutral-500">{member.email || member.user?.email}</p>
+                  </div>
+                  {permissions.canManageRoom ? (
+                    <select
+                      className="h-9 rounded border border-white/10 bg-black/40 px-2 text-sm font-bold text-white"
+                      value={member.role || 'editor'}
+                      disabled={settingsSaving}
+                      onChange={(event) => handleMemberRoleChange(member, event.target.value)}
+                    >
+                      <option value="owner">Owner</option>
+                      <option value="editor">Editor</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                  ) : (
+                    <span className="rounded border border-white/10 px-2 py-1 text-xs font-black uppercase text-neutral-300">{member.role || 'editor'}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
           {isRoomHost ? (
             <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

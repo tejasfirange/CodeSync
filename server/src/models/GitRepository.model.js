@@ -86,6 +86,14 @@ const gitRepositorySchema = new mongoose.Schema(
     lastSyncAt: {
       type: Date,
       default: null
+    },
+    lastPullAt: {
+      type: Date,
+      default: null
+    },
+    lastPushAt: {
+      type: Date,
+      default: null
     }
   },
   {

@@ -1,5 +1,6 @@
 import CodeFile from '../models/CodeFile.model.js';
 import { assertRoomMember } from '../services/room.service.js';
+import { cleanupScreenShareForSocket, emitScreenShareForSocket } from './screen.socket.js';
 
 const objectIdPattern = /^[a-f\d]{24}$/i;
 
@@ -94,6 +95,7 @@ const leaveRoom = (io, socket, roomId, getRoomState) => {
   emitRoomUsers(io, roomId, roomState);
   emitPresenceUsers(io, roomId, roomState);
   socket.to(roomId).emit('room:user-left', { roomId, userId, socketId: socket.id });
+  cleanupScreenShareForSocket(io, socket, roomId);
 
   if (roomState.users.size === 0) {
     roomState.typing.clear();
@@ -134,6 +136,7 @@ const registerRoomSocket = (io, socket, getRoomState) => {
 
       emitRoomUsers(io, roomId, roomState);
       emitPresenceUsers(io, roomId, roomState);
+      emitScreenShareForSocket(socket, roomId);
       ack?.({ success: true });
     } catch (error) {
       ack?.({ success: false, message: error.message });

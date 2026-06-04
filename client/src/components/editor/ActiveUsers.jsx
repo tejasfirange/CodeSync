@@ -20,12 +20,13 @@ const ActiveUsers = ({ users, connected, activeFileId, currentUserId, pingMs, on
         const isCurrentUser = userId === currentUserId;
         const sameFile = Boolean(activeFileId && entry.activeFileId === activeFileId && !isCurrentUser);
         const activeFileLabel = entry.activeFilePath || entry.activeFileName;
+        const roleLabel = entry.role ? `${entry.role.charAt(0).toUpperCase()}${entry.role.slice(1)}` : 'Editor';
 
         return (
           <button
             key={userId || entry.socketId}
             type="button"
-            className="flex w-full items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 text-left transition hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/60 dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+            className="cyber-user-row flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/60"
             onClick={() => onOpenUserFile?.(entry)}
             disabled={!entry.activeFileId && !entry.activeFilePath}
             title={activeFileLabel ? `Open ${activeFileLabel}${entry.cursor?.position ? ' at cursor' : ''}` : 'No active file'}
@@ -41,13 +42,13 @@ const ActiveUsers = ({ users, connected, activeFileId, currentUserId, pingMs, on
               <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate text-sm font-bold text-neutral-900 dark:text-white">{entry.name}</p>
                 {sameFile ? (
-                  <span className="shrink-0 rounded bg-teal-300/15 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-teal-200">
+                  <span className="cyber-same-file-badge shrink-0 rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide">
                     Same file
                   </span>
                 ) : null}
               </div>
               <p className="truncate text-xs text-neutral-500 dark:text-neutral-400" title={activeFileLabel || 'Viewing room'}>
-                {activeFileLabel ? `Editing: ${activeFileLabel}` : 'Viewing room'}
+                {roleLabel} · {activeFileLabel ? `${entry.role === 'viewer' ? 'Viewing' : 'Editing'}: ${activeFileLabel}` : 'Viewing room'}
               </p>
             </div>
           </button>

@@ -14,12 +14,61 @@ const chatMessageSchema = new mongoose.Schema(
       required: true,
       index: true
     },
+    type: {
+      type: String,
+      enum: ['text', 'voice'],
+      default: 'text',
+      index: true
+    },
     message: {
       type: String,
-      required: [true, 'Message is required'],
       trim: true,
-      minlength: 1,
+      default: '',
       maxlength: 2000
+    },
+    voiceUrl: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    voiceFileName: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    voiceMimeType: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    voiceDuration: {
+      type: Number,
+      min: 0,
+      max: 60,
+      default: 0
+    },
+    voiceSize: {
+      type: Number,
+      min: 0,
+      default: 0
+    },
+    isEdited: {
+      type: Boolean,
+      default: false
+    },
+    editedAt: {
+      type: Date
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false
+    },
+    deletedAt: {
+      type: Date
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
     }
   },
   {
@@ -32,6 +81,27 @@ const chatMessageSchema = new mongoose.Schema(
     }
   }
 );
+
+chatMessageSchema.pre('validate', function validateMessageType(next) {
+  if (this.type === 'voice') {
+    if (!this.voiceUrl || !this.voiceDuration) {
+      this.invalidate('voiceUrl', 'Voice message requires audio and duration');
+      next();
+      return;
+    }
+    this.message = this.message || 'Voice note';
+    next();
+    return;
+  }
+
+  if (!this.message?.trim()) {
+    this.invalidate('message', 'Message is required');
+    next();
+    return;
+  }
+
+  next();
+});
 
 chatMessageSchema.index({ room: 1, createdAt: -1 });
 chatMessageSchema.index({ message: 'text' });

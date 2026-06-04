@@ -5,6 +5,13 @@ export const notFound = (req, res, next) => {
 };
 
 const normalizeError = (error) => {
+  if (error.name === 'MulterError') {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return new ApiError(400, 'Voice note must be 5 MB or smaller.');
+    }
+    return new ApiError(400, error.message);
+  }
+
   if (error.name === 'CastError') {
     return new ApiError(400, `Invalid ${error.path}: ${error.value}`);
   }

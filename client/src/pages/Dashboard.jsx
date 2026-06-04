@@ -2,6 +2,7 @@ import { CheckCircle2, DoorOpen, Github, Plus, Search, UsersRound } from 'lucide
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getGithubAccountRequest } from '../api/github.api.js';
+import RoomAnalyticsModal from '../components/analytics/RoomAnalyticsModal.jsx';
 import Button from '../components/common/Button.jsx';
 import EmptyState from '../components/common/EmptyState.jsx';
 import Modal from '../components/common/Modal.jsx';
@@ -43,6 +44,7 @@ const Dashboard = () => {
   const { rooms, loadRooms, createRoom, joinRoom, disbandRoom, loading, error } = useRoom();
   const [createOpen, setCreateOpen] = useState(false);
   const [disbandTarget, setDisbandTarget] = useState(null);
+  const [analyticsTarget, setAnalyticsTarget] = useState(null);
   const [disbanding, setDisbanding] = useState(false);
   const [disbandError, setDisbandError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -219,6 +221,8 @@ const Dashboard = () => {
               isOwner={getEntityId(room.owner) === user?._id}
               onCopy={copyRoomCode}
               onDisband={setDisbandTarget}
+              onAnalytics={setAnalyticsTarget}
+              onSettings={(room) => navigate(`/rooms/${room._id}?settings=1`)}
             />
           ))}
         </section>
@@ -240,6 +244,16 @@ const Dashboard = () => {
           setDisbandError('');
         }}
         onConfirm={handleDisbandRoom}
+      />
+
+      <RoomAnalyticsModal
+        open={Boolean(analyticsTarget)}
+        room={analyticsTarget}
+        onClose={() => setAnalyticsTarget(null)}
+        onError={(message) => {
+          setToast(message);
+          window.setTimeout(() => setToast(''), 2200);
+        }}
       />
     </div>
   );

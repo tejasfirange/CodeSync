@@ -10,8 +10,9 @@ const FileTreeNode = ({ node, depth = 0, activeFileId, expanded, onToggle, onSel
     <div>
       <div
         className={clsx(
-          'group flex h-7 items-center gap-1 rounded px-1 text-sm transition',
-          isActive ? 'bg-[#123b37] text-teal-100' : 'text-neutral-300 hover:bg-white/10'
+          'file-tree-row group flex h-7 items-center gap-1 rounded px-1 text-sm transition',
+          isFolder ? 'file-tree-folder' : 'file-tree-file',
+          isActive ? 'active' : ''
         )}
         style={{ paddingLeft: `${depth * 12 + 6}px` }}
         title={node.path}
@@ -35,24 +36,24 @@ const FileTreeNode = ({ node, depth = 0, activeFileId, expanded, onToggle, onSel
           <span className="truncate font-semibold">{node.name}</span>
         </button>
 
-        {!isFolder ? (
+        {!isFolder && (onRename || onDelete) ? (
           <div className="flex shrink-0 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
-            <button
+            {onRename ? <button
               type="button"
               className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-white/10 hover:text-white"
               onClick={() => onRename(node.file)}
               aria-label={`Rename ${node.path}`}
             >
               <Pencil className="h-3.5 w-3.5" />
-            </button>
-            <button
+            </button> : null}
+            {onDelete ? <button
               type="button"
               className="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-rose-500/15 hover:text-rose-200"
               onClick={() => onDelete(node.file)}
               aria-label={`Delete ${node.path}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
-            </button>
+            </button> : null}
           </div>
         ) : null}
       </div>

@@ -52,20 +52,26 @@ export const formatMessageTime = (value) => {
 export const groupMessagesByDate = (messages = []) => {
   const groups = new Map();
 
-  messages.forEach((message) => {
-    const date = toDate(message.createdAt);
-    const key = date ? dateKey(date) : 'unknown';
+  [...messages]
+    .sort((left, right) => {
+      const leftDate = toDate(left.createdAt);
+      const rightDate = toDate(right.createdAt);
+      return (leftDate?.getTime() || 0) - (rightDate?.getTime() || 0);
+    })
+    .forEach((message) => {
+      const date = toDate(message.createdAt);
+      const key = date ? dateKey(date) : 'unknown';
 
-    if (!groups.has(key)) {
-      groups.set(key, {
-        key,
-        label: formatChatDateGroup(date),
-        messages: []
-      });
-    }
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          label: formatChatDateGroup(date),
+          messages: []
+        });
+      }
 
-    groups.get(key).messages.push(message);
-  });
+      groups.get(key).messages.push(message);
+    });
 
   return Array.from(groups.values());
 };

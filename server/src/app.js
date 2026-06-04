@@ -12,10 +12,12 @@ import { errorHandler, notFound } from './middlewares/error.middleware.js';
 import { apiLimiter } from './middlewares/rateLimit.middleware.js';
 import authRoutes from './routes/auth.routes.js';
 import chatRoutes from './routes/chat.routes.js';
+import executeRoutes from './routes/execute.routes.js';
 import fileRoutes from './routes/file.routes.js';
 import githubRoutes from './routes/github.routes.js';
 import projectRoutes from './routes/project.routes.js';
 import roomRoutes from './routes/room.routes.js';
+import sandboxRoutes from './routes/sandbox.routes.js';
 
 const app = express();
 
@@ -51,6 +53,8 @@ app.use('/api/rooms', roomRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/execute', executeRoutes);
+app.use('/api/sandbox', sandboxRoutes);
 app.use('/api/github', githubRoutes);
 
 app.use(notFound);

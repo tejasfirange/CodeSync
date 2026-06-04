@@ -14,5 +14,14 @@ export const SOCKET_EVENTS = {
   CHAT_NEW: 'chat:new',
   TYPING_START: 'typing:start',
   TYPING_STOP: 'typing:stop',
-  SOCKET_ERROR: 'socket:error'
+  SCREEN_START: 'screen:start',
+  SCREEN_STOP: 'screen:stop',
+  SCREEN_ACTIVE: 'screen:active',
+  SCREEN_USER_JOINED_VIEWER: 'screen:user-joined-viewer',
+  SCREEN_USER_LEFT_VIEWER: 'screen:user-left-viewer',
+  WEBRTC_OFFER: 'webrtc:offer',
+  WEBRTC_ANSWER: 'webrtc:answer',
+  WEBRTC_ICE_CANDIDATE: 'webrtc:ice-candidate',
+  SOCKET_ERROR: 'socket:error',
+  PERMISSION_ERROR: 'permission:error'
 };

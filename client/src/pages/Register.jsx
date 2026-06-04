@@ -22,21 +22,21 @@ const Register = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    await register(form);
-    navigate('/dashboard', { replace: true });
+    try {
+      await register(form);
+      navigate('/dashboard', { replace: true });
+    } catch {
+      // The auth store owns the user-facing error message.
+    }
   };
 
   return (
-    <div className="relative isolate min-h-screen overflow-hidden bg-[#060807] text-white">
-      <div
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_18%,rgba(245,158,11,0.10),transparent_32%),radial-gradient(circle_at_78%_28%,rgba(45,212,191,0.08),transparent_28%)]"
-        aria-hidden="true"
-      />
+    <div className="cyber-app relative isolate min-h-screen overflow-hidden text-white">
       <AuthHeader />
       <div className="mx-auto grid min-h-screen max-w-7xl gap-10 px-4 pb-8 pt-24 sm:px-6 lg:grid-cols-[1fr_480px] lg:px-8">
         <section className="hidden min-h-0 flex-col justify-center gap-16 py-8 lg:flex">
           <div className="max-w-2xl">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-lg border border-amber-300/25 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-amber-100">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-lg border border-[var(--border-main)] bg-[rgba(57,255,136,0.08)] px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-[var(--accent)]">
               <TerminalSquare className="h-4 w-4" aria-hidden="true" />
               Provision identity
             </div>
@@ -46,17 +46,17 @@ const Register = () => {
             </p>
           </div>
 
-          <div className="rounded-lg border border-white/10 bg-black p-4 font-mono text-sm text-neutral-300 shadow-sm">
-            <p><span className="text-amber-300">identity</span>.create()</p>
-            <p><span className="text-teal-300">cookie</span>.httpOnly()</p>
-            <p><span className="text-sky-300">room</span>.ready()</p>
+          <div className="rounded-lg border border-[var(--border-main)] bg-[rgba(2,4,3,0.74)] p-4 font-mono text-sm text-[var(--text-muted)] shadow-sm">
+            <p><span className="text-[var(--warning)]">identity</span>.create()</p>
+            <p><span className="text-[var(--accent)]">cookie</span>.httpOnly()</p>
+            <p><span className="text-[var(--accent-2)]">room</span>.ready()</p>
           </div>
         </section>
 
         <section className="flex items-center justify-center">
-          <div className="w-full rounded-lg border border-white/10 bg-[#101413] p-6 shadow-2xl sm:p-8">
+          <div className="cyber-modal w-full p-6 sm:p-8">
             <div className="mb-7">
-              <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-amber-300 text-neutral-950">
+              <span className="cyber-brand-icon mb-4 flex h-12 w-12 items-center justify-center rounded-lg">
                 <ShieldCheck className="h-6 w-6" aria-hidden="true" />
               </span>
               <h1 className="text-3xl font-black text-white">Create account</h1>
@@ -97,7 +97,7 @@ const Register = () => {
                   {error}
                 </p>
               ) : null}
-              <Button type="submit" className="w-full !bg-amber-300 !text-neutral-950 hover:!bg-amber-200" disabled={loading}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 Register
               </Button>
             </form>

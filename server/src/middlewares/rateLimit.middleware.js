@@ -33,3 +33,27 @@ export const githubLimiter = rateLimit({
     message: 'Too many GitHub requests, please try again later'
   }
 });
+
+export const executeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  message: {
+    success: false,
+    message: 'Too many code runs. Please wait a few minutes before running again.'
+  }
+});
+
+export const voiceNoteLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?._id?.toString() || req.ip,
+  message: {
+    success: false,
+    message: 'Too many voice notes. Please wait a few minutes before recording again.'
+  }
+});

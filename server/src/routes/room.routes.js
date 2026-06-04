@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import Joi from 'joi';
-import { create, getById, join, list, remove, update } from '../controllers/room.controller.js';
+import { analytics, create, getById, join, list, remove, update, updateRole, updateSettings } from '../controllers/room.controller.js';
 import { protect } from '../middlewares/auth.middleware.js';
 import validate from '../middlewares/validate.middleware.js';
 
@@ -38,9 +38,36 @@ const updateRoomSchema = Joi.object({
   }).min(1)
 });
 
+const updateSettingsSchema = Joi.object({
+  params: Joi.object({
+    roomId: objectId.required()
+  }),
+  body: Joi.object({
+    allowEditorsToRunCode: Joi.boolean(),
+    allowViewersToRunCode: Joi.boolean(),
+    allowEditorsToManageFiles: Joi.boolean(),
+    allowViewersToChat: Joi.boolean(),
+    allowScreenShare: Joi.boolean(),
+    allowViewersToScreenShare: Joi.boolean()
+  }).min(1)
+});
+
+const updateRoleSchema = Joi.object({
+  params: Joi.object({
+    roomId: objectId.required(),
+    userId: objectId.required()
+  }),
+  body: Joi.object({
+    role: Joi.string().valid('owner', 'editor', 'viewer').required()
+  })
+});
+
 router.use(protect);
 router.route('/').post(validate(createRoomSchema), create).get(list);
 router.post('/join', validate(joinRoomSchema), join);
+router.get('/:roomId/analytics', validate(roomIdSchema), analytics);
+router.patch('/:roomId/settings', validate(updateSettingsSchema), updateSettings);
+router.patch('/:roomId/members/:userId/role', validate(updateRoleSchema), updateRole);
 router.route('/:roomId').get(validate(roomIdSchema), getById).patch(validate(updateRoomSchema), update).delete(validate(roomIdSchema), remove);
 
 export default router;

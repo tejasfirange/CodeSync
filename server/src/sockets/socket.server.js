@@ -7,6 +7,7 @@ import registerChatSocket from './chat.socket.js';
 import registerCodeSocket from './code.socket.js';
 import registerCursorSocket from './cursor.socket.js';
 import registerRoomSocket, { cleanupSocketRooms } from './room.socket.js';
+import registerScreenSocket, { cleanupScreenShareForSocket } from './screen.socket.js';
 
 const collaborationState = {
   rooms: new Map()
@@ -92,8 +93,10 @@ export const setupSocketServer = (httpServer) => {
     registerCodeSocket(io, socket, getRoomState);
     registerCursorSocket(io, socket, getRoomState);
     registerChatSocket(io, socket, getRoomState);
+    registerScreenSocket(io, socket);
 
     socket.on('disconnect', () => {
+      cleanupScreenShareForSocket(io, socket);
       cleanupSocketRooms(io, socket, getRoomState);
     });
   });

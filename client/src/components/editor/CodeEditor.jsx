@@ -12,7 +12,8 @@ const CodeEditor = ({
   currentUserId,
   presenceUsers,
   showRemoteCursors = true,
-  focusPosition
+  focusPosition,
+  readOnly = false
 }) => {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
@@ -103,7 +104,9 @@ const CodeEditor = ({
         tabSize: 2,
         automaticLayout: true,
         wordWrap: 'on',
-        renderWhitespace: 'selection'
+        renderWhitespace: 'selection',
+        readOnly,
+        readOnlyMessage: { value: 'View-only mode' }
       }}
     />
   );
