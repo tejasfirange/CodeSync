@@ -11,7 +11,10 @@ const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
 const assertOAuthConfigured = () => {
   if (!env.githubClientId || !env.githubClientSecret) {
-    throw new ApiError(500, 'GitHub OAuth is not configured');
+    throw new ApiError(
+      503,
+      'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in server/.env, then restart the server.'
+    );
   }
 };
 

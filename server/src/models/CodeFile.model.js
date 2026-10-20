@@ -121,7 +121,17 @@ const backfillMissingCodeFilePaths = async () => {
 export const ensureCodeFileIndexes = async () => {
   await backfillMissingCodeFilePaths();
 
-  const indexes = await CodeFile.collection.indexes();
+  let indexes;
+  try {
+    indexes = await CodeFile.collection.indexes();
+  } catch (error) {
+    if (error?.code !== 26 && error?.codeName !== 'NamespaceNotFound') {
+      throw error;
+    }
+
+    // A fresh database has no namespace yet; createIndex below will create it.
+    indexes = [];
+  }
   const safeDropIndex = async (index) => {
     if (!index?.name || index.name === '_id_') {
       return;

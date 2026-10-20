@@ -1,7 +1,8 @@
-import { Copy, FilePlus2, MessageSquareText, PanelLeft, Play, Save, Settings2, Trash2, X } from 'lucide-react';
+import { Copy, FilePlus2, MessageSquareText, PanelLeft, Play, Save, Settings2, Sparkles, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Panel, PanelGroup } from 'react-resizable-panels';
+import AIAssistantPanel from '../components/ai/AIAssistantPanel.jsx';
 import ChatPanel from '../components/chat/ChatPanel.jsx';
 import ActiveUsers from '../components/editor/ActiveUsers.jsx';
 import CodeEditor from '../components/editor/CodeEditor.jsx';
@@ -24,6 +25,8 @@ import useRoom from '../hooks/useRoom.js';
 import useScreenShare from '../hooks/useScreenShare.js';
 import useSocket from '../hooks/useSocket.js';
 import { SOCKET_EVENTS } from '../socket/socketEvents.js';
+import { useRoomStore } from '../store/room.store.js';
+import { createCodeChangeQueue } from '../utils/codeChangeQueue.js';
 import { LANGUAGES } from '../utils/constants.js';
 import { detectLanguageFromPath, getFileTemplate } from '../utils/fileTemplates.js';
 import { detectLanguageFromFile, isExecutableLanguage, normalizeExecutableLanguage } from '../utils/language.js';
@@ -109,6 +112,7 @@ const Room = () => {
     activeProject,
     files,
     activeFile,
+    dirtyFileIds: dirtyFiles,
     loading,
     error,
     loadWorkspace,
@@ -138,11 +142,11 @@ const Room = () => {
   const [renameFile, setRenameFile] = useState(null);
   const [renamePath, setRenamePath] = useState('');
   const [creatingFile, setCreatingFile] = useState(false);
-  const [dirtyFiles, setDirtyFiles] = useState(() => new Set());
   const [workspaceSettings, setWorkspaceSettings] = useState(readWorkspaceSettings);
   const [roomJoined, setRoomJoined] = useState(false);
   const [explorerOpen, setExplorerOpen] = useState(() => !window.matchMedia('(max-width: 800px)').matches);
   const [rightPanelOpen, setRightPanelOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
+  const [rightPanelTab, setRightPanelTab] = useState('chat');
   const [openedFileIds, setOpenedFileIds] = useState([]);
   const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
   const [userCursorTarget, setUserCursorTarget] = useState(null);
@@ -160,18 +164,64 @@ const Room = () => {
   const [terminalHeight, setTerminalHeight] = useState(readTerminalHeight);
   const [terminalRestoreHeight, setTerminalRestoreHeight] = useState(readTerminalHeight);
   const [terminalMinimized, setTerminalMinimized] = useState(false);
+  const [terminalMaximized, setTerminalMaximized] = useState(false);
+  const terminalPanelRef = useRef(null);
   const [notice, setNotice] = useState('');
   const [pageError, setPageError] = useState('');
 
   const activeFileRef = useRef(activeFile);
+  const previousRoomIdRef = useRef(roomId);
+  const connectionRef = useRef(null);
+  const codeQueueRef = useRef(null);
+  const workspaceEpochRef = useRef(0);
   const disbandingRef = useRef(false);
   const savingRef = useRef(false);
-  const pendingPatchRef = useRef({});
-  const codeTimerRef = useRef(null);
   const cursorTimerRef = useRef(null);
   const roomSettings = getRoomSettings(currentRoom);
   const permissions = getRoomPermissions(currentRoom, user?._id);
   const isRoomHost = permissions.canManageRoom;
+
+  connectionRef.current = { connected, roomJoined, roomId, socket, canEdit: permissions.canEdit };
+  if (!codeQueueRef.current) {
+    codeQueueRef.current = createCodeChangeQueue({
+      isConnected: () => {
+        const connection = connectionRef.current;
+        return Boolean(connection?.connected && connection.roomJoined && connection.socket?.connected && connection.canEdit);
+      },
+      send: (payload) => {
+        const connection = connectionRef.current;
+        if (
+          !connection?.connected ||
+          !connection.roomJoined ||
+          !connection.canEdit ||
+          !connection.socket?.connected ||
+          connection.roomId !== payload.roomId
+        ) {
+          return;
+        }
+        connection.socket.emit(SOCKET_EVENTS.CODE_CHANGE, payload);
+      }
+    });
+  }
+
+  const emitCodeChange = (payload) => {
+    const connection = connectionRef.current;
+    if (
+      !connection?.connected ||
+      !connection.roomJoined ||
+      !connection.canEdit ||
+      !connection.socket?.connected ||
+      connection.roomId !== payload.roomId
+    ) {
+      return false;
+    }
+    connection.socket.emit(SOCKET_EVENTS.CODE_CHANGE, payload);
+    return true;
+  };
+
+  // Read the synchronous store, not a render-time ref or a second content cache.
+  const getLatestLocalFile = (fileId) => useRoomStore.getState().files.find((file) => file._id === fileId);
+
   const showNotice = useCallback((message, timeout = 2200) => {
     setNotice(message);
     window.setTimeout(() => setNotice(''), timeout);
@@ -224,14 +274,35 @@ const Room = () => {
   }, [workspaceSettings]);
 
   useEffect(() => {
-    loadWorkspace(roomId).catch((loadError) => setPageError(loadError.message));
+    const epoch = ++workspaceEpochRef.current;
+    setSaving(false);
+    setCreatingFile(false);
+    setRenameModalOpen(false);
+    setRenameFile(null);
+    setNotice('');
+    setPageError('');
+    loadWorkspace(roomId).catch((loadError) => {
+      if (epoch === workspaceEpochRef.current) setPageError(loadError.message);
+    });
 
     return () => {
-      window.clearTimeout(codeTimerRef.current);
+      workspaceEpochRef.current += 1;
+      savingRef.current = false;
+      codeQueueRef.current?.cancelAll();
       window.clearTimeout(cursorTimerRef.current);
       resetWorkspace();
     };
   }, [loadWorkspace, resetWorkspace, roomId]);
+
+  useEffect(() => {
+    if (previousRoomIdRef.current === roomId) {
+      return;
+    }
+
+    previousRoomIdRef.current = roomId;
+    // A room change must never leave an AI result from the previous workspace visible.
+    setRightPanelTab('chat');
+  }, [roomId]);
 
   useEffect(() => {
     if (!activeProject?._id || !permissions.canRunCode) {
@@ -289,14 +360,29 @@ const Room = () => {
       }
 
       if (payload.type === 'initial') {
-        applyRemoteFiles(payload.files);
+        const activeProjectId = useRoomStore.getState().activeProject?._id;
+        if (activeProjectId) {
+          applyRemoteFiles(payload.files.filter((file) => file.project === activeProjectId));
+        }
+        return;
+      }
+
+      const activeProjectId = useRoomStore.getState().activeProject?._id;
+      if (activeProjectId && payload.project !== activeProjectId) {
         return;
       }
 
       if (payload.deleted) {
+        codeQueueRef.current?.cancelFile(payload.fileId);
         removeLocalFile(payload.fileId);
         return;
       }
+
+      codeQueueRef.current?.updateMetadata(payload.fileId, {
+        filename: payload.filename,
+        path: payload.path,
+        language: payload.language
+      });
 
       applyRemoteFiles([
         {
@@ -344,6 +430,7 @@ const Room = () => {
     });
 
     return () => {
+      codeQueueRef.current?.cancelAll();
       socket.emit(SOCKET_EVENTS.ROOM_LEAVE, { roomId });
       socket.off(SOCKET_EVENTS.ROOM_USERS, handleUsers);
       socket.off(SOCKET_EVENTS.PRESENCE_USERS_UPDATE, handlePresenceUsers);
@@ -370,33 +457,23 @@ const Room = () => {
     });
   }, [activeFile?._id, activeFile?.filename, activeFile?.path, connected, roomJoined, roomId, socket, user?._id]);
 
-  const queueCodeChange = (patch) => {
-    if (!permissions.canEdit) {
-      return;
+  const queueCodeChange = (file, patch = {}) => {
+    if (!permissions.canEdit || !file?._id) {
+      return false;
     }
-    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
-    window.clearTimeout(codeTimerRef.current);
 
-    codeTimerRef.current = window.setTimeout(() => {
-      const file = activeFileRef.current;
-      const pendingPatch = pendingPatchRef.current;
-      pendingPatchRef.current = {};
-
-      if (!file || !connected) {
-        return;
-      }
-
-      socket.emit(SOCKET_EVENTS.CODE_CHANGE, {
-        roomId,
-        fileId: file._id,
-        project: file.project,
-        filename: file.filename,
-        path: getFilePath(file),
-        language: pendingPatch.language || file.language,
-        content: Object.prototype.hasOwnProperty.call(pendingPatch, 'content') ? pendingPatch.content : file.content,
-        version: Date.now()
-      });
-    }, 120);
+    const version = Object.prototype.hasOwnProperty.call(patch, 'version') ? patch.version : Date.now();
+    const payload = {
+      roomId,
+      fileId: file._id,
+      project: file.project,
+      filename: file.filename,
+      path: getFilePath(file),
+      language: patch.language || file.language,
+      content: Object.prototype.hasOwnProperty.call(patch, 'content') ? patch.content : file.content,
+      version
+    };
+    return codeQueueRef.current.enqueue(payload);
   };
 
   const handleEditorChange = (content) => {
@@ -408,9 +485,10 @@ const Room = () => {
       return;
     }
 
-    updateLocalFile(activeFile._id, { content, version: Date.now() });
-    setDirtyFiles((current) => new Set(current).add(activeFile._id));
-    queueCodeChange({ content });
+    const version = Date.now();
+    setNotice('');
+    updateLocalFile(activeFile._id, { content, version });
+    queueCodeChange(activeFile, { content, version });
   };
 
   const handleCursorChange = ({ position, selection }) => {
@@ -435,7 +513,7 @@ const Room = () => {
   };
 
   const handleSave = useCallback(async () => {
-    const fileToSave = activeFileRef.current;
+    const fileToSave = useRoomStore.getState().activeFile;
     if (!fileToSave?._id || savingRef.current || !permissions.canEdit) {
       if (!permissions.canEdit) {
         setNotice('You have view-only access.');
@@ -444,28 +522,26 @@ const Room = () => {
       return;
     }
 
+    const epoch = workspaceEpochRef.current;
     savingRef.current = true;
     setSaving(true);
     setNotice('');
     try {
       await saveFile(fileToSave._id, {
-        filename: fileToSave.filename,
-        path: getFilePath(fileToSave),
-        language: fileToSave.language,
         content: fileToSave.content
       });
-      setDirtyFiles((current) => {
-        const next = new Set(current);
-        next.delete(fileToSave._id);
-        return next;
-      });
-      setNotice('Saved');
+      if (epoch !== workspaceEpochRef.current) return;
+      const state = useRoomStore.getState();
+      if (state.files.some((file) => file._id === fileToSave._id)) {
+        setNotice(state.dirtyFileIds.has(fileToSave._id) ? 'Snapshot saved; newer changes are unsaved' : 'Saved');
+      }
     } catch (saveError) {
-      setPageError(saveError.message);
+      if (epoch === workspaceEpochRef.current) setNotice(`Save failed: ${saveError.message}. Your changes are still unsaved.`);
     } finally {
-      savingRef.current = false;
-      setSaving(false);
-      window.setTimeout(() => setNotice(''), 1600);
+      if (epoch === workspaceEpochRef.current) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   }, [permissions.canEdit, saveFile]);
 
@@ -483,6 +559,7 @@ const Room = () => {
     const path = newFile.path.trim().replace(/\\/g, '/').replace(/^\/+/, '');
     const language = inferLanguageFromPath(path);
 
+    const epoch = workspaceEpochRef.current;
     setCreatingFile(true);
     try {
       const file = await createFile({
@@ -492,8 +569,9 @@ const Room = () => {
         language,
         content: getFileTemplate(path, language)
       });
+      if (epoch !== workspaceEpochRef.current) return;
 
-      socket.emit(SOCKET_EVENTS.CODE_CHANGE, {
+      emitCodeChange({
         roomId,
         fileId: file._id,
         project: file.project,
@@ -507,9 +585,9 @@ const Room = () => {
       setFileModalOpen(false);
       setNewFile({ path: 'utils.js', language: 'javascript' });
     } catch (createError) {
-      setPageError(createError.message);
+      if (epoch === workspaceEpochRef.current) setPageError(createError.message);
     } finally {
-      setCreatingFile(false);
+      if (epoch === workspaceEpochRef.current) setCreatingFile(false);
     }
   };
 
@@ -532,28 +610,48 @@ const Room = () => {
 
     const path = renamePath.trim().replace(/\\/g, '/').replace(/^\/+/, '');
     setPageError('');
+    const fileId = renameFile._id;
+    const epoch = workspaceEpochRef.current;
+    if (!getLatestLocalFile(fileId)) return;
+    codeQueueRef.current.cancelFile(fileId);
 
     try {
-      const updated = await saveFile(renameFile._id, {
+      // Keep content out of the REST rename so a stale modal snapshot cannot
+      // overwrite edits made after the modal opened.
+      await saveFile(fileId, {
         filename: getBasename(path),
         path,
-        language: inferLanguageFromPath(path),
-        content: renameFile.content
+        language: inferLanguageFromPath(path)
       });
-      socket.emit(SOCKET_EVENTS.CODE_CHANGE, {
+
+      if (epoch !== workspaceEpochRef.current) return;
+      const broadcastFile = getLatestLocalFile(fileId);
+      if (!broadcastFile) return;
+      // A rename is a lifecycle operation, so publish its final metadata
+      // immediately after dropping any text queued while the REST request ran.
+      codeQueueRef.current.cancelFile(fileId);
+      emitCodeChange({
         roomId,
-        fileId: updated._id,
-        project: updated.project,
-        filename: updated.filename,
-        path: getFilePath(updated),
-        language: updated.language,
-        content: updated.content,
-        version: updated.version
+        fileId: broadcastFile._id,
+        project: broadcastFile.project,
+        filename: broadcastFile.filename,
+        path: getFilePath(broadcastFile),
+        language: broadcastFile.language,
+        content: broadcastFile.content,
+        version: broadcastFile.version
       });
       setRenameModalOpen(false);
       setRenameFile(null);
     } catch (renameError) {
-      setPageError(renameError.message);
+      if (epoch !== workspaceEpochRef.current) return;
+      const currentFile = getLatestLocalFile(fileId);
+      if (currentFile) {
+        queueCodeChange(currentFile, {
+          content: currentFile.content,
+          version: currentFile.version
+        });
+      }
+      setNotice(`Rename failed: ${renameError.message}`);
     }
   };
 
@@ -573,15 +671,31 @@ const Room = () => {
       return;
     }
 
-    await deleteFile(file._id);
-    socket.emit(SOCKET_EVENTS.CODE_CHANGE, {
-      roomId,
-      fileId: file._id,
-      filename: file.filename,
-      path: getFilePath(file),
-      project: file.project,
-      deleted: true
-    });
+    const epoch = workspaceEpochRef.current;
+    codeQueueRef.current.cancelFile(file._id);
+    try {
+      await deleteFile(file._id);
+      if (epoch !== workspaceEpochRef.current) return;
+      codeQueueRef.current.cancelFile(file._id);
+      emitCodeChange({
+        roomId,
+        fileId: file._id,
+        filename: file.filename,
+        path: getFilePath(file),
+        project: file.project,
+        deleted: true
+      });
+    } catch (deleteError) {
+      if (epoch !== workspaceEpochRef.current) return;
+      const currentFile = getLatestLocalFile(file._id);
+      if (currentFile) {
+        queueCodeChange(currentFile, {
+          content: currentFile.content,
+          version: currentFile.version
+        });
+      }
+      setNotice(`Delete failed: ${deleteError.message}`);
+    }
   };
 
   const handleGitHubPullFiles = (pulledFiles) => {
@@ -590,6 +704,21 @@ const Room = () => {
     }
 
     applyRemoteFiles(pulledFiles);
+  };
+
+  const handleApplyAiCode = (code) => {
+    const currentFile = useRoomStore.getState().activeFile;
+    if (!currentFile?._id || typeof code !== 'string' || !code.trim()) {
+      setNotice('Open a file before applying AI code.');
+      window.setTimeout(() => setNotice(''), 1800);
+      return;
+    }
+
+    // Applying is intentionally local-only. The existing store marks the file dirty;
+    // the user can review it and use the normal Save action when ready.
+    updateLocalFile(currentFile._id, { content: code, version: Date.now() });
+    setNotice('AI code applied to the active file');
+    window.setTimeout(() => setNotice(''), 1800);
   };
 
   const copyRoomCode = async () => {
@@ -976,7 +1105,7 @@ const Room = () => {
           >
             <PanelLeft className="h-4 w-4" />
           </button>
-          <div className="min-w-0">
+          <div className="room-toolbar-identity min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-xl font-black text-white">{currentRoom?.name}</h1>
               <button
@@ -987,7 +1116,13 @@ const Room = () => {
                 <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                 {currentRoom?.roomCode}
               </button>
-              {notice ? <span className="truncate text-xs font-bold text-teal-300">{notice}</span> : null}
+              <span className={`workspace-status ${connected ? '' : 'is-offline'}`} data-state={connected ? 'online' : 'offline'}>
+                <span aria-hidden="true">●</span> {connected ? 'Live' : 'Offline'}
+              </span>
+              <span className={`workspace-status workspace-save-status ${activeFileDirty ? 'is-dirty' : ''}`}>
+                {saving ? 'Saving' : activeFileDirty ? 'Unsaved' : 'Saved'}
+              </span>
+              {notice ? <span className="workspace-notice truncate text-xs font-bold text-teal-300">{notice}</span> : null}
               {!permissions.canEdit ? <span className="rounded border border-[var(--border-main)] px-2 py-1 text-xs font-black uppercase text-[var(--accent)]">View only</span> : null}
             </div>
             <p className="truncate text-sm font-medium text-neutral-400">{activeProject?.title}</p>
@@ -1006,13 +1141,32 @@ const Room = () => {
             onStop={screenShare.stopSharing}
             onOpen={() => setRightPanelOpen(true)}
           />
-          <RunButton
-            disabled={false}
-            unsupported={Boolean(activeFile && !activeFileExecutable)}
-            onRun={() => {
-              setExecutionOpen((value) => !value);
-              setTerminalMinimized(false);
-              if (!permissions.canRunCode) {
+          <button
+            type="button"
+            className="room-toolbar-icon"
+            onClick={() => {
+              if (rightPanelOpen && rightPanelTab === 'ai') {
+                setRightPanelOpen(false);
+                return;
+              }
+              setRightPanelOpen(true);
+              setRightPanelTab('ai');
+            }}
+            aria-label={rightPanelOpen && rightPanelTab === 'ai' ? 'Close CodeSync AI' : 'Open CodeSync AI'}
+            aria-pressed={rightPanelOpen && rightPanelTab === 'ai'}
+            title="CodeSync AI"
+          >
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
+          </button>
+           <RunButton
+             disabled={false}
+             unsupported={Boolean(activeFile && !activeFileExecutable)}
+             open={executionOpen}
+             onRun={() => {
+               setExecutionOpen((value) => !value);
+               setTerminalMinimized(false);
+               setTerminalMaximized(false);
+               if (!permissions.canRunCode) {
                 setExecutionError('Terminal access is disabled by the room owner.');
               }
             }}
@@ -1035,9 +1189,18 @@ const Room = () => {
           <button
             type="button"
             className="room-toolbar-icon room-right-toggle"
-            onClick={() => setRightPanelOpen((value) => !value)}
-            aria-label={rightPanelOpen ? 'Collapse collaboration panel' : 'Expand collaboration panel'}
-            aria-pressed={rightPanelOpen}
+            onClick={() => {
+              if (!rightPanelOpen) {
+                setRightPanelOpen(true);
+                setRightPanelTab('chat');
+              } else if (rightPanelTab === 'chat') {
+                setRightPanelOpen(false);
+              } else {
+                setRightPanelTab('chat');
+              }
+            }}
+            aria-label={rightPanelOpen && rightPanelTab === 'chat' ? 'Collapse collaboration panel' : 'Open chat panel'}
+            aria-pressed={rightPanelOpen && rightPanelTab === 'chat'}
           >
             <MessageSquareText className="h-4 w-4" />
           </button>
@@ -1180,17 +1343,29 @@ const Room = () => {
                   </div>
                 </Panel>
 
-                {executionOpen ? (
-                  <>
-                    <ResizeHandle id="terminal-resize" />
-                    <Panel
-                      id="terminal"
-                      order={2}
-                      defaultSize={30}
-                      minSize={terminalMinimized ? 3 : 12}
-                      maxSize={60}
-                      className="terminal-panel-wrapper"
-                    >
+                 {executionOpen ? (
+                   <>
+                     <ResizeHandle id="terminal-resize" />
+                     <Panel
+                       ref={terminalPanelRef}
+                       id="terminal"
+                       order={2}
+                        defaultSize={30}
+                        minSize={terminalMinimized ? 3 : 12}
+                        maxSize={60}
+                        collapsible
+                        collapsedSize={3}
+                        onResize={(size) => {
+                          if (size <= 4) {
+                            setTerminalMinimized(true);
+                            setTerminalMaximized(false);
+                          } else {
+                            setTerminalMinimized(false);
+                            setTerminalMaximized(size >= 50);
+                          }
+                        }}
+                        className="terminal-panel-wrapper"
+                     >
                       <ExecutionPanel
                         open={executionOpen}
                         activeFile={activeFile}
@@ -1200,6 +1375,7 @@ const Room = () => {
                         running={executionRunning}
                         error={executionError}
                         canRun={permissions.canRunCode}
+                        maximized={terminalMaximized}
                         packages={sandboxPackages}
                         packagesLoading={packagesLoading}
                         packageInstalling={packageInstalling}
@@ -1217,17 +1393,29 @@ const Room = () => {
                           setExecutionResult(null);
                           setExecutionError('');
                         }}
-                        onMinimize={() => setTerminalMinimized(true)}
-                        onMaximize={() => {
-                          setTerminalMinimized(false);
-                          setTerminalRestoreHeight(terminalHeight);
-                          updateTerminalHeight(Math.floor(window.innerHeight * 0.6));
-                        }}
-                        onRestore={() => {
-                          setTerminalMinimized(false);
-                          updateTerminalHeight(terminalRestoreHeight);
-                        }}
-                        onClose={() => setExecutionOpen(false)}
+                         onMinimize={() => {
+                           setTerminalMinimized(true);
+                           terminalPanelRef.current?.collapse?.();
+                         }}
+                          onMaximize={() => {
+                            setTerminalMinimized(false);
+                            setTerminalMaximized(true);
+                            setTerminalRestoreHeight(terminalHeight);
+                           terminalPanelRef.current?.resize?.(60);
+                           updateTerminalHeight(Math.floor(window.innerHeight * 0.6));
+                         }}
+                          onRestore={() => {
+                            setTerminalMinimized(false);
+                            setTerminalMaximized(false);
+                           terminalPanelRef.current?.expand?.();
+                           terminalPanelRef.current?.resize?.(30);
+                           updateTerminalHeight(terminalRestoreHeight);
+                         }}
+                         onClose={() => {
+                           setExecutionOpen(false);
+                           setTerminalMinimized(false);
+                           setTerminalMaximized(false);
+                         }}
                         onSelectHistory={(item) => {
                           setExecutionResult(item.result);
                           setExecutionError('');
@@ -1274,7 +1462,7 @@ const Room = () => {
                 className="right-panel right-panel-visible"
               >
                 <PanelGroup direction="vertical" autoSaveId="codesync.rightLayout">
-                  <Panel id="users" order={1} defaultSize={35} minSize={15} className="users-region">
+                  <Panel id="users" order={1} defaultSize={25} minSize={18} className="users-region">
                     <ActiveUsers
                       users={usersWithRoles}
                       connected={connected}
@@ -1298,14 +1486,47 @@ const Room = () => {
                         remoteStreamVersion={screenShare.remoteStreamVersion}
                         onStop={screenShare.stopSharing}
                       />
-                      <div className="min-h-0 flex-1">
-                        {workspaceSettings.chatEnabled && permissions.canChat ? (
-                          <ChatPanel roomId={roomId} socket={socket} currentUser={user} />
-                        ) : (
-                          <div className="flex h-full items-center justify-center px-4 text-center text-sm font-semibold text-neutral-500">
-                            Chat is turned off for your role.
-                          </div>
-                        )}
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <div className="flex shrink-0 items-center gap-1 border-b border-white/10 bg-black/20 px-2 py-1.5" role="tablist" aria-label="Collaboration tools">
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={rightPanelTab === 'chat'}
+                            className={`rounded-md px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] transition ${rightPanelTab === 'chat' ? 'bg-teal-300/10 text-teal-200' : 'text-neutral-500 hover:bg-white/5 hover:text-neutral-200'}`}
+                            onClick={() => setRightPanelTab('chat')}
+                          >
+                            Chat
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={rightPanelTab === 'ai'}
+                            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] transition ${rightPanelTab === 'ai' ? 'bg-teal-300/10 text-teal-200' : 'text-neutral-500 hover:bg-white/5 hover:text-neutral-200'}`}
+                            onClick={() => setRightPanelTab('ai')}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                            CodeSync AI
+                          </button>
+                        </div>
+                        <div className="min-h-0 flex-1">
+                          {rightPanelTab === 'ai' ? (
+                            <AIAssistantPanel
+                              key={roomId}
+                              roomId={roomId}
+                              projectId={activeProject?._id}
+                              activeFile={activeFile}
+                              canEdit={permissions.canEdit}
+                              onApplyCode={handleApplyAiCode}
+                              onClose={() => setRightPanelTab('chat')}
+                            />
+                          ) : workspaceSettings.chatEnabled && permissions.canChat ? (
+                            <ChatPanel roomId={roomId} socket={socket} currentUser={user} />
+                          ) : (
+                            <div className="flex h-full items-center justify-center px-4 text-center text-sm font-semibold text-neutral-500">
+                              Chat is turned off for your role.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </Panel>

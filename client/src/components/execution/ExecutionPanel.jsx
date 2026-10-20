@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronsDown, ChevronsUp, History, LockKeyhole, Package, Play, ShieldCheck, Terminal, Trash2, X, Maximize2, Minimize2 } from 'lucide-react';
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 
 const statusLabels = {
   idle: 'Idle',
@@ -82,6 +82,7 @@ const ExecutionPanel = ({
   running,
   error,
   minimized,
+  maximized = false,
   history = [],
   packages = [],
   packagesLoading = false,
@@ -114,11 +115,7 @@ const ExecutionPanel = ({
   const command = getCommand(language, activeFile);
   const isDockerError = /docker.*running|requires docker/i.test(error || result?.stderr || '');
 
-  const canMaximize = useMemo(() => {
-    // This logic might need adjustment since we're in a resizable panel now
-    // But for now we'll keep it as a placeholder for the maximize button toggle
-    return true; 
-  }, []);
+  const canMaximize = !maximized;
 
   if (!open) {
     return null;
@@ -321,7 +318,19 @@ const ExecutionPanel = ({
 
   return (
     <aside className={`execution-panel terminal-shell ${minimized ? 'minimized' : ''}`}>
-      <div className="execution-panel-header terminal-header" onClick={minimized ? onRestore : undefined} role={minimized ? 'button' : undefined} tabIndex={minimized ? 0 : undefined}>
+      <div
+        className="execution-panel-header terminal-header"
+        onClick={minimized ? onRestore : undefined}
+        onKeyDown={(event) => {
+          if (minimized && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            onRestore?.();
+          }
+        }}
+        role={minimized ? 'button' : undefined}
+        tabIndex={minimized ? 0 : undefined}
+        aria-label={minimized ? 'Restore terminal panel' : undefined}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <div className="terminal-window-dots" aria-hidden="true">
             <span className="red" />

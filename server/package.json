@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "test": "node --test",
+    "test:mongodb": "node checks/mongo-startup.check.js",
     "lint": "node --check src/server.js"
   },
   "dependencies": {

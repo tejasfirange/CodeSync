@@ -53,12 +53,15 @@ const FileExplorer = ({ files, activeFile, onSelect, onCreate, onCreateFolder, o
   return (
     <aside className="flex h-full min-h-0 flex-col bg-[#0f1413]">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 px-3">
-        <h2 className="text-xs font-black uppercase tracking-[0.14em] text-neutral-400">Explorer</h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="text-xs font-black uppercase tracking-[0.14em] text-neutral-400">Explorer</h2>
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-black text-neutral-500">{files.length}</span>
+        </div>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" onClick={handleCreateFolder} aria-label="New folder">
+          <Button variant="ghost" size="icon" onClick={handleCreateFolder} aria-label="New folder" title="New folder">
             <FolderPlus className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={() => onCreate?.()} aria-label="New file">
+          <Button variant="ghost" size="icon" onClick={() => onCreate?.()} aria-label="New file" title="New file">
             <Plus className="h-4 w-4" />
           </Button>
         </div>

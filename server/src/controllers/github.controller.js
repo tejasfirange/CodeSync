@@ -26,8 +26,18 @@ const getClientRedirectUrl = (status, message = '') => {
 };
 
 export const oauthStart = asyncHandler(async (req, res) => {
-  const url = generateOAuthUrl(req.user._id, { privateAccess: req.query.private === 'true' });
-  res.redirect(url);
+  try {
+    const url = generateOAuthUrl(req.user._id, { privateAccess: req.query.private === 'true' });
+    res.redirect(url);
+  } catch (error) {
+    // OAuth starts in a browser navigation. Send configuration failures to the
+    // existing callback page instead of rendering a raw API stack trace.
+    if (error?.statusCode === 503 && /GitHub OAuth is not configured/i.test(error.message || '')) {
+      res.redirect(getClientRedirectUrl('error', error.message));
+      return;
+    }
+    throw error;
+  }
 });
 
 export const oauthCallback = asyncHandler(async (req, res) => {

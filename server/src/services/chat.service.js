@@ -6,11 +6,13 @@ import { assertRoomMember, canChatInRoom } from './room.service.js';
 
 const chatPopulate = [{ path: 'sender', select: 'name email avatarColor role' }];
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const chronologicalRecentMessages = (messages) => [...messages].reverse();
 
 export const listRoomMessages = async (roomId, userId) => {
   await assertRoomMember(roomId, userId);
 
-  return ChatMessage.find({ room: roomId }).sort({ createdAt: 1 }).limit(200).populate(chatPopulate);
+  const messages = await ChatMessage.find({ room: roomId }).sort({ createdAt: -1 }).limit(200).populate(chatPopulate);
+  return chronologicalRecentMessages(messages);
 };
 
 export const searchRoomMessages = async (roomId, userId, { q = '', limit = 50, page = 1 } = {}) => {

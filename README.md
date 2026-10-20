@@ -81,6 +81,7 @@ The React app automatically connects API and Socket.IO traffic to `http://YOUR_I
 ```bash
 npm run dev      # run client and server together
 npm run build    # build the React client
+npm test         # run backend and frontend regression tests
 npm start        # start the Express server
 ```
 
@@ -90,6 +91,68 @@ Workspace scripts are also available:
 npm run dev --workspace client
 npm run dev --workspace server
 ```
+
+## Regression Tests and Improvement Work
+
+Install the exact locked dependencies with `npm ci`, then run from the repository root:
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+The regression suite uses Vitest, React Testing Library, and jsdom. It tests per-file
+debouncing, save reconciliation, dirty-state feedback, rename interactions, and stale
+workspace responses. API calls, sockets, Monaco, and media components are mocked in
+the component tests; MongoDB, Docker, credentials, and a running server are not required.
+These tests do not replace an actual two-browser collaboration or sandbox test.
+
+Backend startup/index tests use Node's built-in test runner and mock database calls:
+
+```bash
+npm run test --workspace server
+```
+
+For a real fresh-database check, run `npm run test:mongodb --workspace server -- PORT`
+with the port of a separate local MongoDB test instance. The check does not read
+`.env`: it creates a uniquely named test database, reproduces the missing-collection
+error, verifies initialization and repeated startup/backfill, then deletes only that
+generated test database. It never targets the application's `codesync` database.
+
+Run a focused suite or watch tests while developing:
+
+```bash
+npm test --workspace client -- src/store/room.store.test.js
+npm run test:watch --workspace client
+```
+
+`.github/workflows/checks.yml` runs install, tests, the existing lint scripts, and a
+production build on Node 22 after pushes/pull requests. The existing `lint` command
+is still only a server entry-point syntax check plus a client development build;
+full ESLint and backend integration coverage remain follow-up work.
+
+### Editor smoke checks
+
+With the normal application and MongoDB running, use two authenticated browser sessions:
+
+1. Create/open files A and B. Edit A and quickly select B. Only A should change on
+   the other client. Edit both quickly and verify both updates arrive separately.
+2. Slow the save request with browser network throttling. Save A, then continue
+   typing before the response arrives. New text must remain and the status must
+   stay **Unsaved changes** until another successful save.
+3. Rename a file with unsaved text. Its path changes, but rename does not implicitly
+   save or replace its text. Save explicitly, then reload to check persistence.
+4. Simulate a failed save. The editor should remain available with the local text,
+   an error notice, and a usable Save button for retry.
+5. Leave the room while a request is pending. Its late response must not populate
+   a different workspace or emit an old queued text change.
+
+Current scope: these changes fix client-side request/debounce races, not concurrent
+multi-user merging or offline recovery. Disconnected queued broadcasts are discarded
+instead of replayed blindly; users should save before leaving. Conflict-safe editing,
+durable autosave, reconnect recovery, and socket authorization hardening remain in
+`IMPROVEMENT_PLAN.md`.
 
 ## API Routes
 
@@ -150,6 +213,10 @@ GitHub:
 - `POST /api/github/repositories/:id/pull`
 - `POST /api/github/repositories/:id/push`
 
+AI:
+
+- `POST /api/ai/generate`
+
 ## GitHub Integration
 
 CodeSync lets each authenticated user connect their GitHub account with OAuth, then choose repositories from a searchable in-app picker. There are no hardcoded tokens, and GitHub access tokens are encrypted at rest.
@@ -171,6 +238,17 @@ GITHUB_REDIRECT_URI=http://localhost:5000/api/github/oauth/callback
 GITHUB_TOKEN_ENCRYPTION_SECRET=replace-with-a-random-64-character-secret
 CLIENT_URL=http://localhost:5173
 ```
+
+Restart the backend after changing these values:
+
+```powershell
+npm run dev --workspace server
+```
+
+If OAuth is not configured, CodeSync keeps the rest of the application available
+and redirects the GitHub connection attempt to a readable setup-error page. It
+does not expose the client secret in the browser. Never paste the GitHub client
+secret into chat, source files, screenshots, or commits.
 
 OAuth permissions:
 
@@ -195,6 +273,47 @@ Security:
 - Project and room access are validated before repository connect, pull, and push.
 - GitHub endpoints have a stricter rate limit than normal API routes.
 - Never commit tokens, `.env` files, SSH keys, or private credentials.
+
+## Gemini AI Assistant
+
+CodeSync includes an optional, server-mediated Gemini assistant inside each room.
+It can generate code, explain code, suggest fixes, and review the active project.
+The backend loads repository context from the authenticated project, prioritizes
+the active file, excludes likely secret files, redacts common secret assignments,
+and sends bounded context to Gemini. The browser never receives the Gemini key or
+builds the repository context request itself.
+
+Configure Gemini only in `server/.env`:
+
+```bash
+GEMINI_API_KEY=replace-with-your-rotated-gemini-key
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_MODEL=gemini-3.1-flash-lite
+```
+
+Do not put `GEMINI_API_KEY` in `client/.env`, source code, screenshots, commits,
+issue reports, or chat messages. If a key is ever pasted into a chat or committed,
+revoke/rotate it immediately and replace it in `server/.env`.
+
+Restart the backend after changing the server environment:
+
+```powershell
+npm run dev --workspace server
+```
+
+In a room, open the **CodeSync AI** sparkle button or the **CodeSync AI** tab in
+the collaboration panel. Choose an intent, describe the task, and optionally add
+selected text. Review the response, warnings, target file, and code preview before
+using **Apply to editor**. Applying code changes only the local editor and marks
+the file unsaved; it does not save automatically. Review the change and use the
+normal Save action when ready.
+
+If Gemini is not configured, the rest of CodeSync remains available and the panel
+shows a configuration message instead of failing room startup. AI requests are
+authenticated, project-scoped, bounded, timed out, and rate-limited per user.
+
+The server accepts only the room/project/file identity, intent, prompt, and optional
+selection. It does not accept arbitrary client-supplied repository context.
 
 ## Code Execution
 

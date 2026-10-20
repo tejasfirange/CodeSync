@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import AppShell from './components/layout/AppShell.jsx';
 import useAuth from './hooks/useAuth.js';
@@ -15,9 +15,11 @@ import ProtectedRoute from './utils/protectedRoute.jsx';
 
 const App = () => {
   const { initialized, checkAuth } = useAuth();
+  const authCheckStartedRef = useRef(false);
 
   useEffect(() => {
-    if (!initialized) {
+    if (!initialized && !authCheckStartedRef.current) {
+      authCheckStartedRef.current = true;
       checkAuth();
     }
   }, [checkAuth, initialized]);

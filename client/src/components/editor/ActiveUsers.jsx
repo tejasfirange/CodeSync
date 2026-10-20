@@ -6,7 +6,12 @@ const formatPing = (pingMs) => (Number.isFinite(pingMs) ? `${pingMs} ms` : '-- m
 const ActiveUsers = ({ users, connected, activeFileId, currentUserId, pingMs, onOpenUserFile }) => (
   <aside className="flex h-full min-h-0 flex-col bg-[#0f1413]">
     <div className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 px-3">
-      <h2 className="text-xs font-black uppercase tracking-[0.14em] text-neutral-400">Users</h2>
+      <div className="flex min-w-0 items-center gap-2">
+        <h2 className="text-xs font-black uppercase tracking-[0.14em] text-neutral-400">People</h2>
+        <span className="rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-black text-neutral-500">
+          {users.length}
+        </span>
+      </div>
       <div className="flex items-center gap-2">
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide ${connected ? 'bg-teal-300/10 text-teal-200' : 'bg-rose-500/10 text-rose-200'}`}>
           {formatPing(pingMs)}
@@ -15,7 +20,7 @@ const ActiveUsers = ({ users, connected, activeFileId, currentUserId, pingMs, on
       </div>
     </div>
     <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-      {users.map((entry) => {
+      {users.length ? users.map((entry) => {
         const userId = entry.userId || entry._id;
         const isCurrentUser = userId === currentUserId;
         const sameFile = Boolean(activeFileId && entry.activeFileId === activeFileId && !isCurrentUser);
@@ -53,7 +58,13 @@ const ActiveUsers = ({ users, connected, activeFileId, currentUserId, pingMs, on
             </div>
           </button>
         );
-      })}
+      }) : (
+        <div className="flex h-full min-h-28 flex-col items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/[0.02] px-4 text-center">
+          <span className="mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-teal-300/20 bg-teal-300/10 text-teal-200">⌁</span>
+          <p className="text-xs font-bold text-neutral-400">Waiting for collaborators</p>
+          <p className="mt-1 text-[11px] leading-4 text-neutral-600">Share the room code to start pairing.</p>
+        </div>
+      )}
     </div>
   </aside>
 );

@@ -11,6 +11,7 @@ import { env } from './config/env.js';
 import { errorHandler, notFound } from './middlewares/error.middleware.js';
 import { apiLimiter } from './middlewares/rateLimit.middleware.js';
 import authRoutes from './routes/auth.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import executeRoutes from './routes/execute.routes.js';
 import fileRoutes from './routes/file.routes.js';
@@ -49,6 +50,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/files', fileRoutes);

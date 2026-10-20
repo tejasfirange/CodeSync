@@ -1,0 +1,25 @@
+name: CodeSync checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # Existing lint scripts are only a server entry-point syntax check and
+      # a client development build. Full ESLint coverage is a follow-up.
+      - run: npm run lint
+      - run: npm run build

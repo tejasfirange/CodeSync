@@ -30,7 +30,10 @@ const envSchema = Joi.object({
   GITHUB_CLIENT_ID: Joi.string().allow('').default(''),
   GITHUB_CLIENT_SECRET: Joi.string().allow('').default(''),
   GITHUB_REDIRECT_URI: Joi.string().uri().default('http://localhost:5000/api/github/oauth/callback'),
-  GITHUB_TOKEN_ENCRYPTION_SECRET: Joi.string().min(32).required()
+  GITHUB_TOKEN_ENCRYPTION_SECRET: Joi.string().min(32).required(),
+  GEMINI_API_KEY: Joi.string().trim().allow('').default(''),
+  GEMINI_BASE_URL: Joi.string().uri().default('https://generativelanguage.googleapis.com/v1beta'),
+  GEMINI_MODEL: Joi.string().trim().min(1).max(120).default('gemini-3.1-flash-lite')
 }).unknown(true);
 
 const { value, error } = envSchema.validate({
@@ -58,5 +61,8 @@ export const env = {
   githubClientId: value.GITHUB_CLIENT_ID,
   githubClientSecret: value.GITHUB_CLIENT_SECRET,
   githubRedirectUri: value.GITHUB_REDIRECT_URI,
-  githubTokenEncryptionSecret: value.GITHUB_TOKEN_ENCRYPTION_SECRET
+  githubTokenEncryptionSecret: value.GITHUB_TOKEN_ENCRYPTION_SECRET,
+  geminiApiKey: value.GEMINI_API_KEY,
+  geminiBaseUrl: value.GEMINI_BASE_URL,
+  geminiModel: value.GEMINI_MODEL
 };
